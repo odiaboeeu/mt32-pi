@@ -45,7 +45,7 @@ constexpr u32 MisterUpdatePeriodMillis             = 50;
 constexpr u32 LEDTimeoutMillis                     = 50;
 constexpr u32 ActiveSenseTimeoutMillis             = 330;
 
-constexpr float Sample24BitMax = (1 << 24 - 1) - 1;
+constexpr float Sample24BitMax = (1 << (24 - 1)) - 1;
 
 enum class TCustomSysExCommand : u8
 {
