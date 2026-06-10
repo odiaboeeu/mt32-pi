@@ -31,6 +31,7 @@ OBJS		:=	src/config.o \
 			src/soundfontmanager.o \
 			src/synth/mt32synth.o \
 			src/synth/soundfontsynth.o \
+			src/synth/sc55synth.o \
 			src/zoneallocator.o
 
 EXTRACLEAN	+=	src/*.d src/*.o \
@@ -109,3 +110,10 @@ CXXFLAGS        +=      -I"$(NEWLIBDIR)/include" \
                         -I$(CIRCLESTDLIBHOME)/include \
                         -Iinclude \
                         -I.
+
+# Experimental Nuked-SC55 headless core
+SC55LIB := $(CURDIR)/build-sc55/libnukedsc55_core.a
+EXTRALIBS += --whole-archive $(SC55LIB) --no-whole-archive
+
+# Force keeping experimental SC-55 link probe when --gc-sections is enabled
+LDFLAGS += -u SC55_LinkProbe
