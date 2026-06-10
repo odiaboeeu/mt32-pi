@@ -32,6 +32,7 @@
 #include "lcd/drivers/ssd1306.h"
 #include "lcd/ui.h"
 #include "mt32pi.h"
+#include "synth/sc55synth.h"
 
 #define MT32_PI_NAME "mt32-pi"
 LOGMODULE(MT32_PI_NAME);
@@ -119,7 +120,8 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_nMasterVolume(100),
 	  m_pCurrentSynth(nullptr),
 	  m_pMT32Synth(nullptr),
-	  m_pSoundFontSynth(nullptr)
+	  m_pSoundFontSynth(nullptr),
+        m_pSC55Synth(nullptr)
 {
 	s_pThis = this;
 }
@@ -275,6 +277,14 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	LCDLog(TLCDLogType::Startup, "Init FluidSynth");
 	InitSoundFontSynth();
 
+        // Experimental: force Nuked-SC55 as current synth if ROMs are available.
+        // Remove this block after proper config/menu integration.
+        if (InitSC55Synth())
+        {
+                LOGNOTE("Experimental Nuked-SC55 forced as current synth");
+                m_pCurrentSynth = m_pSC55Synth;
+        }
+
 	// Set initial synthesizer
 	if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::MT32)
 		m_pCurrentSynth = m_pMT32Synth;
@@ -401,6 +411,7 @@ bool CMT32Pi::InitSoundFontSynth()
 	{
 		LOGWARN("FluidSynth init failed; no SoundFonts present?");
 		delete m_pSoundFontSynth;
+        delete m_pSC55Synth;
 		m_pSoundFontSynth = nullptr;
 		return false;
 	}
@@ -408,6 +419,25 @@ bool CMT32Pi::InitSoundFontSynth()
 	m_pSoundFontSynth->SetUserInterface(&m_UserInterface);
 
 	return true;
+}
+
+
+bool CMT32Pi::InitSC55Synth()
+{
+        assert(m_pSC55Synth == nullptr);
+
+        m_pSC55Synth = new CSC55Synth(m_pConfig->AudioSampleRate);
+        if (!m_pSC55Synth->Initialize())
+        {
+                LOGWARN("Nuked-SC55 init failed; ROMs present?");
+                delete m_pSC55Synth;
+                m_pSC55Synth = nullptr;
+                return false;
+        }
+
+        m_pSC55Synth->SetUserInterface(&m_UserInterface);
+
+        return true;
 }
 
 void CMT32Pi::MainTask()

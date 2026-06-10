@@ -66,6 +66,8 @@
 
 //#define MONITOR_TEMPERATURE
 
+class CSC55Synth;
+
 class CMT32Pi : CMultiCoreSupport, CPower, CMIDIParser, CAppleMIDIHandler, CUDPMIDIHandler
 {
 public:
@@ -112,6 +114,7 @@ private:
 	bool InitNetwork();
 	bool InitMT32Synth();
 	bool InitSoundFontSynth();
+        bool InitSC55Synth();
 
 	// Tasks for specific CPU cores
 	void MainTask();
@@ -212,6 +215,7 @@ private:
 	CSynthBase* m_pCurrentSynth;
 	CMT32Synth* m_pMT32Synth;
 	CSoundFontSynth* m_pSoundFontSynth;
+        CSC55Synth* m_pSC55Synth;
 
 	// MIDI receive buffer
 	CRingBuffer<u8, MIDIRxBufferSize> m_MIDIRxBuffer;
