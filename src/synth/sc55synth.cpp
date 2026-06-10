@@ -171,6 +171,11 @@ bool CSC55Synth::Initialize()
 
         SC55_HeadlessInit();
 
+        // Experimental warm-up: allow the emulated MCUs/PCM to advance a little
+        // before the first audio callback. Keep this small to avoid delaying boot.
+        for (unsigned i = 0; i < 200000; ++i)
+                SC55_HeadlessRunStep();
+
         m_bInitialized = true;
         LOGNOTE("Experimental Nuked-SC55 initialized");
         return true;
@@ -252,7 +257,7 @@ size_t CSC55Synth::Render(s16* pOutBuffer, size_t nFrames)
 
                 // Crude first-pass scheduler. We will tune this later.
                 unsigned guard = 0;
-                while (!SC55_HeadlessPopSample(&left, &right) && guard < 20000)
+                while (!SC55_HeadlessPopSample(&left, &right) && guard < 512)
                 {
                         SC55_HeadlessRunStep();
                         ++guard;
@@ -283,7 +288,7 @@ size_t CSC55Synth::Render(float* pOutBuffer, size_t nFrames)
                 short right = 0;
 
                 unsigned guard = 0;
-                while (!SC55_HeadlessPopSample(&left, &right) && guard < 20000)
+                while (!SC55_HeadlessPopSample(&left, &right) && guard < 512)
                 {
                         SC55_HeadlessRunStep();
                         ++guard;

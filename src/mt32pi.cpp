@@ -279,7 +279,9 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 
         // Experimental: force Nuked-SC55 as current synth if ROMs are available.
         // Remove this block after proper config/menu integration.
-        if (InitSC55Synth())
+        // Experimental Nuked-SC55 temporarily disabled as current synth.
+        // Keep the backend linked, but do not initialize/force it until diagnostics are ready.
+        if (false && InitSC55Synth())
         {
                 LOGNOTE("Experimental Nuked-SC55 forced as current synth");
                 m_pCurrentSynth = m_pSC55Synth;
