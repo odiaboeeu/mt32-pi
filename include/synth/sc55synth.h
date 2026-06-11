@@ -11,6 +11,8 @@
 
 #include "synth/synthbase.h"
 
+class CSC55ProducerTask;
+
 class CSC55Synth : public CSynthBase
 {
 public:
@@ -20,6 +22,8 @@ public:
         // CSynthBase
         virtual bool Initialize() override;
         void Pump(size_t nMaxSteps);
+        void StopProducer();
+        bool IsProducerRunning() const { return m_bProducerRunning; }
         virtual void HandleMIDIShortMessage(u32 nMessage) override;
         virtual void HandleMIDISysExMessage(const u8* pData, size_t nSize) override;
         virtual bool IsActive() override { return m_bInitialized; }
@@ -33,6 +37,9 @@ public:
 private:
         bool LoadROMFile(const char* pPath, u8*& pOutData, unsigned int& nOutSize);
         void FreeROMBuffer(u8*& pData);
+
+        CSC55ProducerTask* m_pProducerTask;
+        volatile bool m_bProducerRunning;
 
         bool m_bInitialized;
         u8 m_nVolume;

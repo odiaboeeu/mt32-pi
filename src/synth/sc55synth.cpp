@@ -9,6 +9,8 @@
 #include <stdio.h>
 
 #include <circle/logger.h>
+#include <circle/sched/task.h>
+#include <circle/sched/scheduler.h>
 
 #include "lcd/lcd.h"
 #include "lcd/ui.h"
@@ -103,6 +105,31 @@ namespace
 }
 }
 
+
+class CSC55ProducerTask : public CTask
+{
+public:
+        explicit CSC55ProducerTask(CSC55Synth* pSynth)
+                : CTask(),
+                  m_pSynth(pSynth)
+        {
+        }
+
+        virtual void Run() override
+        {
+                while (m_pSynth && m_pSynth->IsProducerRunning())
+                {
+                        m_pSynth->Pump(8192);
+
+                        // Cooperative scheduler: yield so MIDI/UI/audio tasks can run.
+                        CScheduler::Get()->Yield();
+                }
+        }
+
+private:
+        CSC55Synth* m_pSynth;
+};
+
 // Kept intentionally so the linker can be forced to retain the experimental core.
 extern "C" void SC55_LinkProbe(void)
 {
@@ -127,6 +154,8 @@ extern "C" void SC55_LinkProbe(void)
 
 CSC55Synth::CSC55Synth(unsigned nSampleRate)
         : CSynthBase(nSampleRate),
+          m_pProducerTask(nullptr),
+          m_bProducerRunning(false),
           m_bInitialized(false),
           m_nVolume(100)
 {
@@ -134,6 +163,8 @@ CSC55Synth::CSC55Synth(unsigned nSampleRate)
 
 CSC55Synth::~CSC55Synth()
 {
+        StopProducer();
+
         if (m_bInitialized)
                 SC55_HeadlessCloseAudio();
 }
@@ -266,6 +297,14 @@ bool CSC55Synth::Initialize()
 
         // Pre-fill the native sample ring outside the audio render path.
         Pump(200000);
+
+        m_bProducerRunning = true;
+        m_pProducerTask = new CSC55ProducerTask(this);
+
+        if (!m_pProducerTask)
+                SC55SDLog("SC55 producer task allocation failed");
+        else
+                SC55SDLog("SC55 producer task started");
         LOGNOTE("Experimental Nuked-SC55 initialized");
         SC55SDLog("SC55 initialized OK");
         return true;
@@ -330,6 +369,17 @@ void CSC55Synth::SetMasterVolume(u8 nVolume)
         m_nVolume = nVolume;
 }
 
+
+
+void CSC55Synth::StopProducer()
+{
+        m_bProducerRunning = false;
+
+        // Cooperative task will exit on its next yield/run.
+        // We intentionally do not delete m_pProducerTask here in this POC,
+        // because Circle tasks manage their lifetime after Run() returns.
+        m_pProducerTask = nullptr;
+}
 
 void CSC55Synth::Pump(size_t nMaxSteps)
 {
