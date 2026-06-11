@@ -277,16 +277,6 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	LCDLog(TLCDLogType::Startup, "Init FluidSynth");
 	InitSoundFontSynth();
 
-        // Experimental: force Nuked-SC55 as current synth if ROMs are available.
-        // Remove this block after proper config/menu integration.
-        // Experimental Nuked-SC55 temporarily disabled as current synth.
-        // Keep the backend linked, but do not initialize/force it until diagnostics are ready.
-        if (false && InitSC55Synth())
-        {
-                LOGNOTE("Experimental Nuked-SC55 forced as current synth");
-                m_pCurrentSynth = m_pSC55Synth;
-        }
-
 	// Set initial synthesizer
 	if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::MT32)
 		m_pCurrentSynth = m_pMT32Synth;
@@ -308,6 +298,14 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 			return false;
 		}
 	}
+
+        // Experimental Nuked-SC55 forced after normal synth selection.
+        if (InitSC55Synth())
+        {
+                LOGNOTE("Experimental Nuked-SC55 forced as current synth after selection");
+                m_pCurrentSynth = m_pSC55Synth;
+                m_pCurrentSynth->SetMasterVolume(m_nMasterVolume);
+        }
 
 	if (m_pPisound)
 		LOGNOTE("Using Pisound MIDI interface");
@@ -452,6 +450,7 @@ void CMT32Pi::MainTask()
 
 	while (m_bRunning)
 	{
+
 		// Process MIDI data
 		UpdateMIDI();
 

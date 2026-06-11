@@ -5,6 +5,8 @@
 //
 
 #include <fatfs/ff.h>
+#include <cstring>
+#include <stdio.h>
 
 #include <circle/logger.h>
 
@@ -14,6 +16,20 @@
 #include "utility.h"
 
 LOGMODULE("sc55synth");
+
+static void SC55SDLog(const char* pMessage)
+{
+        FIL File;
+        if (f_open(&File, "SD:sc55.log", FA_OPEN_APPEND | FA_WRITE) == FR_OK)
+        {
+                UINT nWritten;
+                f_write(&File, pMessage, strlen(pMessage), &nWritten);
+                f_write(&File, "\r\n", 2, &nWritten);
+                f_close(&File);
+        }
+}
+
+
 
 extern "C"
 {
@@ -31,6 +47,60 @@ extern "C"
         void SC55_HeadlessPostMIDIByte(unsigned char data);
         void SC55_HeadlessRunStep(void);
         int SC55_HeadlessPopSample(short* left, short* right);
+}
+
+
+namespace
+{
+        constexpr unsigned SC55NativeSampleRate = 66207;
+        constexpr size_t SC55RingFrames = 131072;
+        constexpr size_t SC55PrebufferFrames = 32768;
+
+        short g_SC55RingLeft[SC55RingFrames];
+        short g_SC55RingRight[SC55RingFrames];
+
+        size_t g_SC55RingRead = 0;
+        size_t g_SC55RingWrite = 0;
+        size_t g_SC55RingCount = 0;
+
+        unsigned g_SC55ResampleAccumulator = 0;
+        short g_SC55LastLeft = 0;
+        short g_SC55LastRight = 0;
+        size_t g_SC55Underruns = 0;
+
+        void SC55RingPush(short left, short right)
+        {
+                if (g_SC55RingCount >= SC55RingFrames)
+                        return;
+
+                g_SC55RingLeft[g_SC55RingWrite] = left;
+                g_SC55RingRight[g_SC55RingWrite] = right;
+                g_SC55RingWrite = (g_SC55RingWrite + 1) % SC55RingFrames;
+                ++g_SC55RingCount;
+        }
+
+        bool SC55RingPop(short& left, short& right)
+        {
+                if (g_SC55RingCount == 0)
+                        return false;
+
+                left = g_SC55RingLeft[g_SC55RingRead];
+                right = g_SC55RingRight[g_SC55RingRead];
+                g_SC55RingRead = (g_SC55RingRead + 1) % SC55RingFrames;
+                --g_SC55RingCount;
+                return true;
+        }
+
+        void SC55RingClear()
+        {
+                g_SC55RingRead = 0;
+                g_SC55RingWrite = 0;
+                g_SC55RingCount = 0;
+                g_SC55ResampleAccumulator = 0;
+                g_SC55LastLeft = 0;
+                g_SC55LastRight = 0;
+                        g_SC55Underruns = 0;
+}
 }
 
 // Kept intentionally so the linker can be forced to retain the experimental core.
@@ -85,6 +155,7 @@ bool CSC55Synth::LoadROMFile(const char* pPath, u8*& pOutData, unsigned int& nOu
         if (Result != FR_OK)
         {
                 LOGERR("Failed to open ROM: %s", pPath);
+                SC55SDLog("SC55 Failed to open ROM");
                 return false;
         }
 
@@ -92,6 +163,7 @@ bool CSC55Synth::LoadROMFile(const char* pPath, u8*& pOutData, unsigned int& nOu
         if (nSize == 0)
         {
                 LOGERR("Empty ROM: %s", pPath);
+                SC55SDLog("SC55 Empty ROM");
                 f_close(&File);
                 return false;
         }
@@ -100,6 +172,7 @@ bool CSC55Synth::LoadROMFile(const char* pPath, u8*& pOutData, unsigned int& nOu
         if (!pOutData)
         {
             LOGERR("Failed to allocate ROM buffer: %s", pPath);
+            SC55SDLog("SC55 Failed to allocate ROM buffer");
             f_close(&File);
             return false;
         }
@@ -111,17 +184,29 @@ bool CSC55Synth::LoadROMFile(const char* pPath, u8*& pOutData, unsigned int& nOu
         if (Result != FR_OK || nRead != nSize)
         {
                 LOGERR("Failed to read ROM: %s", pPath);
+                SC55SDLog("SC55 Failed to read ROM");
                 FreeROMBuffer(pOutData);
                 return false;
         }
 
         nOutSize = static_cast<unsigned int>(nSize);
         LOGNOTE("Loaded ROM %s (%u bytes)", pPath, nOutSize);
+        SC55SDLog("SC55 Loaded ROM");
         return true;
 }
 
 bool CSC55Synth::Initialize()
 {
+        SC55SDLog("SC55 Initialize begin");
+
+        if (m_nSampleRate == 32000)
+                SC55SDLog("SC55 sample rate 32000");
+        else if (m_nSampleRate == 48000)
+                SC55SDLog("SC55 sample rate 48000");
+        else if (m_nSampleRate == 66207)
+                SC55SDLog("SC55 sample rate 66207");
+        else
+                SC55SDLog("SC55 sample rate other");
         u8* pROM1 = nullptr;
         u8* pROM2 = nullptr;
         u8* pWaveROM1 = nullptr;
@@ -151,7 +236,10 @@ bool CSC55Synth::Initialize()
                         pROMSM, nROMSMSize);
 
                 if (!bOK)
+                {
                         LOGERR("SC55_HeadlessLoadMk2RomSetFromMemory failed");
+                        SC55SDLog("SC55 LoadMk2 failed");
+                }
         }
 
         FreeROMBuffer(pROM1);
@@ -166,18 +254,20 @@ bool CSC55Synth::Initialize()
         if (!SC55_HeadlessOpenAudio(512, 64))
         {
                 LOGERR("SC55_HeadlessOpenAudio failed");
+                SC55SDLog("SC55 OpenAudio failed");
                 return false;
         }
 
         SC55_HeadlessInit();
 
-        // Experimental warm-up: allow the emulated MCUs/PCM to advance a little
-        // before the first audio callback. Keep this small to avoid delaying boot.
-        for (unsigned i = 0; i < 200000; ++i)
-                SC55_HeadlessRunStep();
+        SC55RingClear();
 
         m_bInitialized = true;
+
+        // Pre-fill the native sample ring outside the audio render path.
+        Pump(200000);
         LOGNOTE("Experimental Nuked-SC55 initialized");
+        SC55SDLog("SC55 initialized OK");
         return true;
 }
 
@@ -240,6 +330,51 @@ void CSC55Synth::SetMasterVolume(u8 nVolume)
         m_nVolume = nVolume;
 }
 
+
+void CSC55Synth::Pump(size_t nMaxSteps)
+{
+        if (!m_bInitialized)
+                return;
+
+        constexpr size_t BatchFrames = 512;
+
+        short BatchLeft[BatchFrames];
+        short BatchRight[BatchFrames];
+
+        for (size_t step = 0; step < nMaxSteps && g_SC55RingCount < SC55PrebufferFrames; ++step)
+        {
+                SC55_HeadlessRunStep();
+
+                size_t nBatchCount = 0;
+                short left = 0;
+                short right = 0;
+
+                while (nBatchCount < BatchFrames && SC55_HeadlessPopSample(&left, &right))
+                {
+                        BatchLeft[nBatchCount] = left;
+                        BatchRight[nBatchCount] = right;
+                        ++nBatchCount;
+                }
+
+                if (nBatchCount == 0)
+                        continue;
+
+                for (size_t i = 0; i < nBatchCount; ++i)
+                {
+                        if (g_SC55RingCount >= SC55RingFrames)
+                                break;
+
+                        SC55RingPush(BatchLeft[i], BatchRight[i]);
+                }
+
+                if (g_SC55RingCount >= SC55RingFrames)
+                        break;
+        }
+}
+
+
+
+
 size_t CSC55Synth::Render(s16* pOutBuffer, size_t nFrames)
 {
         if (!m_bInitialized)
@@ -250,21 +385,46 @@ size_t CSC55Synth::Render(s16* pOutBuffer, size_t nFrames)
 
         m_Lock.Acquire();
 
+        // Experimental block scheduler:
+        // advance the emulated SC-55 core continuously for this audio chunk,
+        // then consume the generated native samples below.
+        constexpr unsigned SC55StepsPerOutputFrame = 128;
+        for (size_t step = 0; step < nFrames * SC55StepsPerOutputFrame; ++step)
+                SC55_HeadlessRunStep();
+
+        constexpr unsigned SC55NativeSampleRate = 66207;
+        static unsigned s_nAccumulator = 0;
+        static short s_LastLeft = 0;
+        static short s_LastRight = 0;
+
         for (size_t i = 0; i < nFrames; ++i)
         {
-                short left = 0;
-                short right = 0;
+                s_nAccumulator += SC55NativeSampleRate;
 
-                // Crude first-pass scheduler. We will tune this later.
-                unsigned guard = 0;
-                while (!SC55_HeadlessPopSample(&left, &right) && guard < 512)
+                bool bGotSample = false;
+
+                while (s_nAccumulator >= m_nSampleRate)
                 {
-                        SC55_HeadlessRunStep();
-                        ++guard;
+                        short left = s_LastLeft;
+                        short right = s_LastRight;
+
+                        if (!SC55_HeadlessPopSample(&left, &right))
+                        {
+                                left = s_LastLeft;
+                                right = s_LastRight;
+                        }
+
+                        s_LastLeft = left;
+                        s_LastRight = right;
+                        bGotSample = true;
+
+                        s_nAccumulator -= m_nSampleRate;
                 }
 
-                pOutBuffer[i * 2 + 0] = static_cast<s16>((left * m_nVolume) / 100);
-                pOutBuffer[i * 2 + 1] = static_cast<s16>((right * m_nVolume) / 100);
+                (void)bGotSample;
+
+                pOutBuffer[i * 2 + 0] = static_cast<s16>((s_LastLeft * m_nVolume) / 100);
+                pOutBuffer[i * 2 + 1] = static_cast<s16>((s_LastRight * m_nVolume) / 100);
         }
 
         m_Lock.Release();
@@ -280,28 +440,70 @@ size_t CSC55Synth::Render(float* pOutBuffer, size_t nFrames)
                 return nFrames;
         }
 
-        m_Lock.Acquire();
+        // Experimental underrun protection.
+        // Start consuming only after the native ring has a useful prebuffer.
+        // Stop consuming again if it drops too low.
+        constexpr size_t StartThreshold = 4096;
+        constexpr size_t StopThreshold = 1024;
+
+        static bool s_bOutputEnabled = false;
+
+        if (!s_bOutputEnabled)
+        {
+                if (g_SC55RingCount >= StartThreshold)
+                {
+                        s_bOutputEnabled = true;
+                }
+                else
+                {
+                        memset(pOutBuffer, 0, nFrames * 2 * sizeof(float));
+                        return nFrames;
+                }
+        }
+        else if (g_SC55RingCount < StopThreshold)
+        {
+                s_bOutputEnabled = false;
+                ++g_SC55Underruns;
+                memset(pOutBuffer, 0, nFrames * 2 * sizeof(float));
+                return nFrames;
+        }
 
         for (size_t i = 0; i < nFrames; ++i)
         {
-                short left = 0;
-                short right = 0;
+                g_SC55ResampleAccumulator += SC55NativeSampleRate;
 
-                unsigned guard = 0;
-                while (!SC55_HeadlessPopSample(&left, &right) && guard < 512)
+                while (g_SC55ResampleAccumulator >= m_nSampleRate)
                 {
-                        SC55_HeadlessRunStep();
-                        ++guard;
+                        short left = g_SC55LastLeft;
+                        short right = g_SC55LastRight;
+
+                        if (SC55RingPop(left, right))
+                        {
+                                g_SC55LastLeft = left;
+                                g_SC55LastRight = right;
+                        }
+                        else
+                        {
+                                s_bOutputEnabled = false;
+                                ++g_SC55Underruns;
+                                break;
+                        }
+
+                        g_SC55ResampleAccumulator -= m_nSampleRate;
                 }
 
-                pOutBuffer[i * 2 + 0] = (left / 32768.0f) * (m_nVolume / 100.0f);
-                pOutBuffer[i * 2 + 1] = (right / 32768.0f) * (m_nVolume / 100.0f);
+                pOutBuffer[i * 2 + 0] = (g_SC55LastLeft / 32768.0f) * (m_nVolume / 100.0f);
+                pOutBuffer[i * 2 + 1] = (g_SC55LastRight / 32768.0f) * (m_nVolume / 100.0f);
         }
-
-        m_Lock.Release();
 
         return nFrames;
 }
+
+
+
+
+
+
 
 void CSC55Synth::ReportStatus() const
 {
@@ -311,6 +513,19 @@ void CSC55Synth::ReportStatus() const
 
 void CSC55Synth::UpdateLCD(CLCD& LCD, unsigned int nTicks)
 {
-        (void)nTicks;
-        LCD.Print("Nuked-SC55", 0, 0, true, false);
+        static unsigned s_nLastUpdateTicks = 0;
+        static char s_Line1[32] = "SC55";
+        static char s_Line2[32] = "";
+
+        if (nTicks - s_nLastUpdateTicks >= static_cast<unsigned>(Utility::MillisToTicks(1000)))
+        {
+                snprintf(s_Line1, sizeof(s_Line1), "SC55 R:%lu", static_cast<unsigned long>(g_SC55RingCount));
+                snprintf(s_Line2, sizeof(s_Line2), "U:%lu", static_cast<unsigned long>(g_SC55Underruns));
+                s_nLastUpdateTicks = nTicks;
+        }
+
+        LCD.Print(s_Line1, 0, 0, true, false);
+        LCD.Print(s_Line2, 0, 1, true, false);
 }
+
+

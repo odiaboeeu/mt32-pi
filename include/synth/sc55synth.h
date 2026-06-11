@@ -19,6 +19,7 @@ public:
 
         // CSynthBase
         virtual bool Initialize() override;
+        void Pump(size_t nMaxSteps);
         virtual void HandleMIDIShortMessage(u32 nMessage) override;
         virtual void HandleMIDISysExMessage(const u8* pData, size_t nSize) override;
         virtual bool IsActive() override { return m_bInitialized; }
