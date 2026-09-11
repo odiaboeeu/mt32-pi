@@ -115,5 +115,8 @@ CXXFLAGS        +=      -I"$(NEWLIBDIR)/include" \
 SC55LIB ?= $(CURDIR)/build-sc55/libnukedsc55_core.a
 EXTRALIBS += --whole-archive $(SC55LIB) --no-whole-archive
 
+# The compressed-kernel rule links the ELF while building the IMG target.
+$(KERNEL).img: $(SC55LIB)
+
 # Force keeping experimental SC-55 link probe when --gc-sections is enabled
 LDFLAGS += -u SC55_LinkProbe

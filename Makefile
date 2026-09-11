@@ -5,7 +5,7 @@
 include Config.mk
 
 .DEFAULT_GOAL=all
-.PHONY: submodules circle-stdlib mt32emu fluidsynth sc55-core all clean veryclean
+.PHONY: submodules circle-stdlib mt32emu fluidsynth check-circle-board sc55-core all clean veryclean
 
 #
 # Functions to apply/reverse patches only if not completely applied/reversed already
@@ -135,6 +135,21 @@ $(FLUIDSYNTHBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 #
 # Build kernel itself
 #
+check-circle-board:
+	@if [ ! -f "$(CIRCLE_STDLIB_CONFIG)" ] || [ ! -f "$(CIRCLE_CONFIG)" ]; then \
+		echo "Circle is not configured for BOARD=$(BOARD)."; \
+		exit 1; \
+	fi
+	@configured_rasppi="$$(sed -n 's/^RASPPI[[:space:]]*=[[:space:]]*//p' "$(CIRCLE_CONFIG)" | tail -1)"; \
+	configured_aarch="$$(sed -n 's/^AARCH[[:space:]]*=[[:space:]]*//p' "$(CIRCLE_CONFIG)" | tail -1)"; \
+	if [ "$$configured_rasppi" != "$(RASPBERRYPI)" ] || [ "$$configured_aarch" != "$(BITS)" ]; then \
+		echo "Circle configuration mismatch."; \
+		echo "Requested: Raspberry Pi $(RASPBERRYPI), $(BITS) bit"; \
+		echo "Configured: Raspberry Pi $$configured_rasppi, $$configured_aarch bit"; \
+		echo "Reconfigure Circle before switching BOARD."; \
+		exit 1; \
+	fi
+
 sc55-core:
 	@if [ "$(SC55_TARGET)" = "unsupported" ]; then \
 		echo "SC-55 experimental build supports BOARD=pi3-64 or BOARD=pi4-64"; \
@@ -144,7 +159,7 @@ sc55-core:
 	SC55BUILDDIR="$(CURDIR)/$(SC55BUILDDIR)" \
 	bash "$(CURDIR)/build-nuked-sc55-core.sh"
 
-all: circle-stdlib mt32emu sc55-core
+all: check-circle-board circle-stdlib mt32emu sc55-core
 	@$(MAKE) -f Kernel.mk \
 		SC55LIB="$(SC55LIB)" \
 		$(KERNEL).img $(KERNEL).hex
