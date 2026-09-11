@@ -30,7 +30,7 @@ OBJS		:=	src/config.o \
 			src/rommanager.o \
 			src/soundfontmanager.o \
 			src/synth/mt32synth.o \
-			src/synth/soundfontsynth.o \
+			src/synth/soundfontsynth_stub.o \
 			src/synth/sc55synth.o  \
 			src/zoneallocator.o
 
@@ -94,7 +94,7 @@ EXTRALIBS	+=	$(MT32EMULIB)
 
 INCLUDE		+=	-I $(FLUIDSYNTHBUILDDIR)/include \
 			-I $(FLUIDSYNTHHOME)/include
-EXTRALIBS	+=	$(FLUIDSYNTHLIB)
+# SC55-only: EXTRALIBS	+=	$(FLUIDSYNTHLIB)
 
 #
 # Generate version string from git tag

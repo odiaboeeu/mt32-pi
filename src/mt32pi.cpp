@@ -272,16 +272,27 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	}
 
 	LCDLog(TLCDLogType::Startup, "Init mt32emu");
-	InitMT32Synth();
+	// InitMT32Synth();
 
 	LCDLog(TLCDLogType::Startup, "Init FluidSynth");
-	InitSoundFontSynth();
+	// InitSoundFontSynth();
+        // Experimental SC55-pi mode: initialize SC-55 as the only active synth.
+        if (InitSC55Synth())
+        {
+                LOGNOTE("Experimental Nuked-SC55 forced as current synth");
+                m_pCurrentSynth = m_pSC55Synth;
+                m_pCurrentSynth->SetMasterVolume(m_nMasterVolume);
+        }
 
-	// Set initial synthesizer
-	if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::MT32)
-		m_pCurrentSynth = m_pMT32Synth;
-	else if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::SoundFont)
-		m_pCurrentSynth = m_pSoundFontSynth;
+
+        // Set initial synthesizer
+        if (!m_pCurrentSynth)
+        {
+                if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::MT32)
+                        m_pCurrentSynth = m_pMT32Synth;
+                else if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::SoundFont)
+                        m_pCurrentSynth = m_pSoundFontSynth;
+        }
 
 	if (!m_pCurrentSynth)
 	{
@@ -299,15 +310,7 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 		}
 	}
 
-        // Experimental Nuked-SC55 forced after normal synth selection.
-        if (InitSC55Synth())
-        {
-                LOGNOTE("Experimental Nuked-SC55 forced as current synth after selection");
-                m_pCurrentSynth = m_pSC55Synth;
-                m_pCurrentSynth->SetMasterVolume(m_nMasterVolume);
-        }
-
-	if (m_pPisound)
+        if (m_pPisound)
 		LOGNOTE("Using Pisound MIDI interface");
 	else if (m_bSerialMIDIEnabled)
 		LOGNOTE("Using serial MIDI interface");
@@ -650,9 +653,24 @@ void CMT32Pi::Run(unsigned nCore)
 		case 2:
 			return AudioTask();
 
+                case 3:
+                        return SC55ProducerCoreTask();
+
 		default:
 			break;
 	}
+}
+
+
+void CMT32Pi::SC55ProducerCoreTask()
+{
+        LOGNOTE("SC-55 producer on Core 3 starting up");
+
+        while (m_bRunning)
+        {
+                if (m_pSC55Synth && m_pSC55Synth->IsProducerRunning())
+                        m_pSC55Synth->Pump(16384);
+        }
 }
 
 void CMT32Pi::OnEnterPowerSavingMode()

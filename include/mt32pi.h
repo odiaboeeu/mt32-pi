@@ -118,6 +118,7 @@ private:
 
 	// Tasks for specific CPU cores
 	void MainTask();
+	void SC55ProducerCoreTask();
 	void UITask();
 	void AudioTask();
 
