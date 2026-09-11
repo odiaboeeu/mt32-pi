@@ -5,7 +5,7 @@
 include Config.mk
 
 .DEFAULT_GOAL=all
-.PHONY: submodules circle-stdlib mt32emu fluidsynth check-circle-board sc55-core all clean veryclean
+.PHONY: submodules circle-stdlib mt32emu fluidsynth switch-board check-circle-board sc55-core all clean veryclean
 
 #
 # Functions to apply/reverse patches only if not completely applied/reversed already
@@ -135,6 +135,26 @@ $(FLUIDSYNTHBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 #
 # Build kernel itself
 #
+switch-board:
+	@if [ "$(SC55_TARGET)" = "unsupported" ]; then \
+		echo "Board switching supports BOARD=pi3-64 or BOARD=pi4-64"; \
+		exit 1; \
+	fi
+	@echo "Switching Circle configuration to BOARD=$(BOARD)"
+	@$(RM) "$(CIRCLESTDLIBHOME)/.done"
+	@$(RM) "$(CIRCLE_STDLIB_CONFIG)"
+	@$(RM) "$(CIRCLE_CONFIG)"
+	@find "$(CIRCLEHOME)" -type f \( -name '*.o' -o -name '*.a' \) -delete
+	@$(RM) -r "$(CIRCLESTDLIBHOME)/build/circle-newlib"
+	@$(RM) -r "$(CIRCLESTDLIBHOME)/install"
+	@git -C "$(CIRCLESTDLIBHOME)" restore -- \
+		build/.gitignore \
+		build/circle-newlib/.gitignore \
+		install/.gitignore
+	@$(MAKE) "$(CIRCLE_STDLIB_CONFIG)" BOARD="$(BOARD)"
+	@$(MAKE) circle-stdlib BOARD="$(BOARD)"
+	@echo "Circle successfully configured for BOARD=$(BOARD)"
+
 check-circle-board:
 	@if [ ! -f "$(CIRCLE_STDLIB_CONFIG)" ] || [ ! -f "$(CIRCLE_CONFIG)" ]; then \
 		echo "Circle is not configured for BOARD=$(BOARD)."; \
