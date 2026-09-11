@@ -25,7 +25,10 @@
 
 #include <circle/gpiopin.h>
 #include <circle/types.h>
+
+#if RASPPI != 5
 #include <circle/usertimer.h>
+#endif
 
 #include "control/rotaryencoder.h"
 #include "event.h"
@@ -58,7 +61,14 @@ protected:
 	static constexpr u32 MinRepeatPeriodMicros = 20000;	// 50Hz
 
 	TEventQueue* m_pEventQueue;
+
+#if RASPPI != 5
+
 	CUserTimer m_Timer;
+#else
+
+	u32 m_nLastPollTicks;
+#endif
 
 	// Debouncing
 	u8 m_ButtonStateHistory[ButtonStateHistoryLength];
@@ -84,8 +94,10 @@ protected:
 			MinRepeatPeriodMicros
 		);
 	}
+#if RASPPI != 5
 
 	static void InterruptHandler(CUserTimer* pUserTimer, void* pParam);
+#endif
 };
 
 class CControlSimpleButtons : public CControl
