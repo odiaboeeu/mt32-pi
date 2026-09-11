@@ -112,7 +112,7 @@ CXXFLAGS        +=      -I"$(NEWLIBDIR)/include" \
                         -I.
 
 # Experimental Nuked-SC55 headless core
-SC55LIB := $(CURDIR)/build-sc55/libnukedsc55_core.a
+SC55LIB ?= $(CURDIR)/build-sc55/libnukedsc55_core.a
 EXTRALIBS += --whole-archive $(SC55LIB) --no-whole-archive
 
 # Force keeping experimental SC-55 link probe when --gc-sections is enabled

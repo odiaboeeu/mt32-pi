@@ -5,7 +5,7 @@
 include Config.mk
 
 .DEFAULT_GOAL=all
-.PHONY: submodules circle-stdlib mt32emu fluidsynth all clean veryclean
+.PHONY: submodules circle-stdlib mt32emu fluidsynth sc55-core all clean veryclean
 
 #
 # Functions to apply/reverse patches only if not completely applied/reversed already
@@ -135,8 +135,19 @@ $(FLUIDSYNTHBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 #
 # Build kernel itself
 #
-all: circle-stdlib mt32emu
-	@$(MAKE) -f Kernel.mk $(KERNEL).img $(KERNEL).hex
+sc55-core:
+	@if [ "$(SC55_TARGET)" = "unsupported" ]; then \
+		echo "SC-55 experimental build supports BOARD=pi3-64 or BOARD=pi4-64"; \
+		exit 1; \
+	fi
+	@SC55_TARGET="$(SC55_TARGET)" \
+	SC55BUILDDIR="$(CURDIR)/$(SC55BUILDDIR)" \
+	bash "$(CURDIR)/build-nuked-sc55-core.sh"
+
+all: circle-stdlib mt32emu sc55-core
+	@$(MAKE) -f Kernel.mk \
+		SC55LIB="$(SC55LIB)" \
+		$(KERNEL).img $(KERNEL).hex
 
 #
 # Clean kernel only

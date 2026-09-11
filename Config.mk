@@ -52,6 +52,18 @@ else
 $(error Invalid board type "$(BOARD)"; please specify one of [ pi2 | pi3 | pi3-64 | pi4 | pi4-64 ])
 endif
 
+# Experimental Nuked-SC55 target selection
+ifeq ($(BOARD), pi3-64)
+SC55_TARGET=pi3
+else ifeq ($(BOARD), pi4-64)
+SC55_TARGET=pi4
+else
+SC55_TARGET=unsupported
+endif
+
+SC55BUILDDIR=build-sc55-$(SC55_TARGET)
+SC55LIB=$(CURDIR)/$(SC55BUILDDIR)/libnukedsc55_core.a
+
 # Compiler flags for external dependencies
 CFLAGS_EXTERNAL = $(CPU_FLAGS)
 ifeq ($(strip $(GC_SECTIONS)),1)
