@@ -48,6 +48,7 @@ extern "C"
         void SC55_HeadlessReset(void);
         void SC55_HeadlessPostMIDIByte(unsigned char data);
         void SC55_HeadlessRunStep(void);
+        void SC55_HeadlessRunSteps(unsigned int count);
         int SC55_HeadlessPopSample(short* left, short* right);
 }
 
@@ -61,35 +62,68 @@ namespace
         short g_SC55RingLeft[SC55RingFrames];
         short g_SC55RingRight[SC55RingFrames];
 
-        size_t g_SC55RingRead = 0;
-        size_t g_SC55RingWrite = 0;
-        size_t g_SC55RingCount = 0;
+        static_assert(
+            (SC55RingFrames & (SC55RingFrames - 1)) == 0,
+            "SC55RingFrames must be a power of two"
+        );
+
+        constexpr size_t SC55RingMask = SC55RingFrames - 1;
+
+        // Single-producer/single-consumer counters.
+        // Core 3 writes only g_SC55RingWrite.
+        // Core 2 writes only g_SC55RingRead.
+        alignas(64) volatile size_t g_SC55RingRead = 0;
+        alignas(64) volatile size_t g_SC55RingWrite = 0;
+
+        size_t SC55RingCount()
+        {
+                const size_t nWrite = g_SC55RingWrite;
+                const size_t nRead = g_SC55RingRead;
+                return nWrite - nRead;
+        }
 
         unsigned g_SC55ResampleAccumulator = 0;
         short g_SC55LastLeft = 0;
         short g_SC55LastRight = 0;
         size_t g_SC55Underruns = 0;
+        size_t g_SC55ProducedSamples = 0;
+        size_t g_SC55ConsumedSamples = 0;
 
-        void SC55RingPush(short left, short right)
+        bool SC55RingPush(short left, short right)
         {
-                if (g_SC55RingCount >= SC55RingFrames)
-                        return;
+                const size_t nWrite = g_SC55RingWrite;
+                const size_t nRead = g_SC55RingRead;
 
-                g_SC55RingLeft[g_SC55RingWrite] = left;
-                g_SC55RingRight[g_SC55RingWrite] = right;
-                g_SC55RingWrite = (g_SC55RingWrite + 1) % SC55RingFrames;
-                ++g_SC55RingCount;
+                if (nWrite - nRead >= SC55RingFrames)
+                        return false;
+
+                const size_t nIndex = nWrite & SC55RingMask;
+
+                g_SC55RingLeft[nIndex] = left;
+                g_SC55RingRight[nIndex] = right;
+
+                // Publish the completed frame to the consumer.
+                g_SC55RingWrite = nWrite + 1;
+                ++g_SC55ProducedSamples;
+                return true;
         }
 
         bool SC55RingPop(short& left, short& right)
         {
-                if (g_SC55RingCount == 0)
+                const size_t nRead = g_SC55RingRead;
+                const size_t nWrite = g_SC55RingWrite;
+
+                if (nRead == nWrite)
                         return false;
 
-                left = g_SC55RingLeft[g_SC55RingRead];
-                right = g_SC55RingRight[g_SC55RingRead];
-                g_SC55RingRead = (g_SC55RingRead + 1) % SC55RingFrames;
-                --g_SC55RingCount;
+                const size_t nIndex = nRead & SC55RingMask;
+
+                left = g_SC55RingLeft[nIndex];
+                right = g_SC55RingRight[nIndex];
+
+                // Release the consumed frame to the producer.
+                g_SC55RingRead = nRead + 1;
+                ++g_SC55ConsumedSamples;
                 return true;
         }
 
@@ -97,7 +131,6 @@ namespace
         {
                 g_SC55RingRead = 0;
                 g_SC55RingWrite = 0;
-                g_SC55RingCount = 0;
                 g_SC55ResampleAccumulator = 0;
                 g_SC55LastLeft = 0;
                 g_SC55LastRight = 0;
@@ -152,11 +185,12 @@ extern "C" void SC55_LinkProbe(void)
         (void)p7;
 }
 
-CSC55Synth::CSC55Synth(unsigned nSampleRate)
+CSC55Synth::CSC55Synth(unsigned nSampleRate, bool bDebug)
         : CSynthBase(nSampleRate),
           m_pProducerTask(nullptr),
           m_bProducerRunning(false),
           m_bInitialized(false),
+          m_bDebug(bDebug),
           m_nVolume(100)
 {
 }
@@ -299,12 +333,10 @@ bool CSC55Synth::Initialize()
         Pump(200000);
 
         m_bProducerRunning = true;
-        m_pProducerTask = new CSC55ProducerTask(this);
 
-        if (!m_pProducerTask)
-                SC55SDLog("SC55 producer task allocation failed");
-        else
-                SC55SDLog("SC55 producer task started");
+        // Producer runs on the dedicated physical Core 3.
+        m_pProducerTask = nullptr;
+        SC55SDLog("SC55 producer assigned to Core 3");
         LOGNOTE("Experimental Nuked-SC55 initialized");
         SC55SDLog("SC55 initialized OK");
         return true;
@@ -386,39 +418,62 @@ void CSC55Synth::Pump(size_t nMaxSteps)
         if (!m_bInitialized)
                 return;
 
-        constexpr size_t BatchFrames = 512;
+        constexpr size_t RunBatchSteps = 64;
+        constexpr size_t SampleBatchFrames = 512;
 
-        short BatchLeft[BatchFrames];
-        short BatchRight[BatchFrames];
+        short BatchLeft[SampleBatchFrames];
+        short BatchRight[SampleBatchFrames];
 
-        for (size_t step = 0; step < nMaxSteps && g_SC55RingCount < SC55PrebufferFrames; ++step)
+        size_t nStepsRemaining = nMaxSteps;
+
+        while (nStepsRemaining > 0 &&
+               SC55RingCount() < SC55PrebufferFrames)
         {
-                SC55_HeadlessRunStep();
+                const size_t nRunSteps =
+                    nStepsRemaining < RunBatchSteps
+                        ? nStepsRemaining
+                        : RunBatchSteps;
 
-                size_t nBatchCount = 0;
-                short left = 0;
-                short right = 0;
+                SC55_HeadlessRunSteps(
+                    static_cast<unsigned int>(nRunSteps)
+                );
 
-                while (nBatchCount < BatchFrames && SC55_HeadlessPopSample(&left, &right))
+                nStepsRemaining -= nRunSteps;
+
+                for (;;)
                 {
-                        BatchLeft[nBatchCount] = left;
-                        BatchRight[nBatchCount] = right;
-                        ++nBatchCount;
-                }
+                        size_t nBatchCount = 0;
+                        short left = 0;
+                        short right = 0;
 
-                if (nBatchCount == 0)
-                        continue;
+                        while (nBatchCount < SampleBatchFrames &&
+                               SC55_HeadlessPopSample(&left, &right))
+                        {
+                                BatchLeft[nBatchCount] = left;
+                                BatchRight[nBatchCount] = right;
+                                ++nBatchCount;
+                        }
 
-                for (size_t i = 0; i < nBatchCount; ++i)
-                {
-                        if (g_SC55RingCount >= SC55RingFrames)
+                        if (nBatchCount == 0)
                                 break;
 
-                        SC55RingPush(BatchLeft[i], BatchRight[i]);
-                }
+                        for (size_t i = 0; i < nBatchCount; ++i)
+                        {
+                                if (SC55RingCount() >= SC55RingFrames)
+                                        return;
 
-                if (g_SC55RingCount >= SC55RingFrames)
-                        break;
+                                SC55RingPush(
+                                    BatchLeft[i],
+                                    BatchRight[i]
+                                );
+                        }
+
+                        if (nBatchCount < SampleBatchFrames ||
+                            SC55RingCount() >= SC55PrebufferFrames)
+                        {
+                                break;
+                        }
+                }
         }
 }
 
@@ -500,7 +555,7 @@ size_t CSC55Synth::Render(float* pOutBuffer, size_t nFrames)
 
         if (!s_bOutputEnabled)
         {
-                if (g_SC55RingCount >= StartThreshold)
+                if (SC55RingCount() >= StartThreshold)
                 {
                         s_bOutputEnabled = true;
                 }
@@ -510,7 +565,7 @@ size_t CSC55Synth::Render(float* pOutBuffer, size_t nFrames)
                         return nFrames;
                 }
         }
-        else if (g_SC55RingCount < StopThreshold)
+        else if (SC55RingCount() < StopThreshold)
         {
                 s_bOutputEnabled = false;
                 ++g_SC55Underruns;
@@ -563,14 +618,47 @@ void CSC55Synth::ReportStatus() const
 
 void CSC55Synth::UpdateLCD(CLCD& LCD, unsigned int nTicks)
 {
+        if (!m_bDebug)
+        {
+                LCD.Print("SC-55mkII", 0, 0, true, false);
+                LCD.Print("Ready", 0, 1, true, false);
+                return;
+        }
+
         static unsigned s_nLastUpdateTicks = 0;
         static char s_Line1[32] = "SC55";
         static char s_Line2[32] = "";
 
-        if (nTicks - s_nLastUpdateTicks >= static_cast<unsigned>(Utility::MillisToTicks(1000)))
+        static size_t s_nLastProduced = 0;
+        static size_t s_nLastConsumed = 0;
+
+        if (nTicks - s_nLastUpdateTicks >=
+            static_cast<unsigned>(Utility::MillisToTicks(1000)))
         {
-                snprintf(s_Line1, sizeof(s_Line1), "SC55 R:%lu", static_cast<unsigned long>(g_SC55RingCount));
-                snprintf(s_Line2, sizeof(s_Line2), "U:%lu", static_cast<unsigned long>(g_SC55Underruns));
+                const size_t nProducedPerSec =
+                    g_SC55ProducedSamples - s_nLastProduced;
+
+                const size_t nConsumedPerSec =
+                    g_SC55ConsumedSamples - s_nLastConsumed;
+
+                snprintf(
+                    s_Line1,
+                    sizeof(s_Line1),
+                    "R:%lu U:%lu",
+                    static_cast<unsigned long>(SC55RingCount()),
+                    static_cast<unsigned long>(g_SC55Underruns)
+                );
+
+                snprintf(
+                    s_Line2,
+                    sizeof(s_Line2),
+                    "P:%lu C:%lu",
+                    static_cast<unsigned long>(nProducedPerSec),
+                    static_cast<unsigned long>(nConsumedPerSec)
+                );
+
+                s_nLastProduced = g_SC55ProducedSamples;
+                s_nLastConsumed = g_SC55ConsumedSamples;
                 s_nLastUpdateTicks = nTicks;
         }
 

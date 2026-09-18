@@ -16,7 +16,7 @@ class CSC55ProducerTask;
 class CSC55Synth : public CSynthBase
 {
 public:
-        explicit CSC55Synth(unsigned nSampleRate);
+        explicit CSC55Synth(unsigned nSampleRate, bool bDebug);
         virtual ~CSC55Synth() override;
 
         // CSynthBase
@@ -42,6 +42,7 @@ private:
         volatile bool m_bProducerRunning;
 
         bool m_bInitialized;
+        bool m_bDebug;
         u8 m_nVolume;
 };
 

@@ -277,35 +277,44 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	LCDLog(TLCDLogType::Startup, "Init FluidSynth");
 	InitSoundFontSynth();
 
-	// Set initial synthesizer
-	if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::MT32)
+	LCDLog(TLCDLogType::Startup, "Init SC-55");
+	if (InitSC55Synth())
+		LOGNOTE("Nuked-SC55 initialized and available");
+
+	// Select the configured default synthesizer.
+	switch (m_pConfig->SystemDefaultSynth)
+	{
+	case CConfig::TSystemDefaultSynth::MT32:
 		m_pCurrentSynth = m_pMT32Synth;
-	else if (m_pConfig->SystemDefaultSynth == CConfig::TSystemDefaultSynth::SoundFont)
+		break;
+
+	case CConfig::TSystemDefaultSynth::SoundFont:
 		m_pCurrentSynth = m_pSoundFontSynth;
+		break;
+
+	case CConfig::TSystemDefaultSynth::SC55:
+		m_pCurrentSynth = m_pSC55Synth;
+		break;
+	}
 
 	if (!m_pCurrentSynth)
 	{
 		LOGERR("Preferred synth failed to initialize successfully");
 
-		// Activate any working synth
 		if (m_pMT32Synth)
 			m_pCurrentSynth = m_pMT32Synth;
 		else if (m_pSoundFontSynth)
 			m_pCurrentSynth = m_pSoundFontSynth;
+		else if (m_pSC55Synth)
+			m_pCurrentSynth = m_pSC55Synth;
 		else
 		{
-			LOGPANIC("No synths available; ROMs/SoundFonts not found");
+			LOGPANIC("No synths available");
 			return false;
 		}
 	}
 
-        // Experimental Nuked-SC55 forced after normal synth selection.
-        if (InitSC55Synth())
-        {
-                LOGNOTE("Experimental Nuked-SC55 forced as current synth after selection");
-                m_pCurrentSynth = m_pSC55Synth;
-                m_pCurrentSynth->SetMasterVolume(m_nMasterVolume);
-        }
+	m_pCurrentSynth->SetMasterVolume(m_nMasterVolume);
 
 	if (m_pPisound)
 		LOGNOTE("Using Pisound MIDI interface");
@@ -411,7 +420,7 @@ bool CMT32Pi::InitSoundFontSynth()
 	{
 		LOGWARN("FluidSynth init failed; no SoundFonts present?");
 		delete m_pSoundFontSynth;
-        delete m_pSC55Synth;
+
 		m_pSoundFontSynth = nullptr;
 		return false;
 	}
@@ -426,7 +435,10 @@ bool CMT32Pi::InitSC55Synth()
 {
         assert(m_pSC55Synth == nullptr);
 
-        m_pSC55Synth = new CSC55Synth(m_pConfig->AudioSampleRate);
+        m_pSC55Synth = new CSC55Synth(
+                m_pConfig->AudioSampleRate,
+                m_pConfig->SC55Debug
+        );
         if (!m_pSC55Synth->Initialize())
         {
                 LOGWARN("Nuked-SC55 init failed; ROMs present?");
@@ -650,9 +662,30 @@ void CMT32Pi::Run(unsigned nCore)
 		case 2:
 			return AudioTask();
 
+		case 3:
+		        return SC55ProducerCoreTask();
+
 		default:
 			break;
 	}
+}
+
+void CMT32Pi::SC55ProducerCoreTask()
+{
+        LOGNOTE("SC-55 producer running on Core 3");
+
+        while (m_bRunning)
+        {
+                if (m_pSC55Synth &&
+                    m_pSC55Synth->IsProducerRunning())
+                {
+                        m_pSC55Synth->Pump(8192);
+                }
+                else
+                {
+                        CTimer::SimpleMsDelay(1);
+                }
+        }
 }
 
 void CMT32Pi::OnEnterPowerSavingMode()
@@ -1074,6 +1107,8 @@ void CMT32Pi::ProcessEventQueue()
 					m_pMT32Synth->AllSoundOff();
 				if (m_pSoundFontSynth)
 					m_pSoundFontSynth->AllSoundOff();
+				if (m_pSC55Synth)
+					m_pSC55Synth->AllSoundOff();
 				break;
 
 			case TEventType::DisplayImage:
@@ -1100,17 +1135,51 @@ void CMT32Pi::ProcessButtonEvent(const TButtonEvent& Event)
 
 	if (Event.Button == TButton::Button1 && !Event.bRepeat)
 	{
-		// Swap synths
+		// Cycle through all available synthesizers.
+		TSynth Candidates[3];
+
 		if (m_pCurrentSynth == m_pMT32Synth)
-			SwitchSynth(TSynth::SoundFont);
+		{
+			Candidates[0] = TSynth::SoundFont;
+			Candidates[1] = TSynth::SC55;
+			Candidates[2] = TSynth::MT32;
+		}
+		else if (m_pCurrentSynth == m_pSoundFontSynth)
+		{
+			Candidates[0] = TSynth::SC55;
+			Candidates[1] = TSynth::MT32;
+			Candidates[2] = TSynth::SoundFont;
+		}
 		else
-			SwitchSynth(TSynth::MT32);
+		{
+			Candidates[0] = TSynth::MT32;
+			Candidates[1] = TSynth::SoundFont;
+			Candidates[2] = TSynth::SC55;
+		}
+
+		for (unsigned i = 0; i < 3; ++i)
+		{
+			CSynthBase* pCandidate = nullptr;
+
+			if (Candidates[i] == TSynth::MT32)
+				pCandidate = m_pMT32Synth;
+			else if (Candidates[i] == TSynth::SoundFont)
+				pCandidate = m_pSoundFontSynth;
+			else if (Candidates[i] == TSynth::SC55)
+				pCandidate = m_pSC55Synth;
+
+			if (pCandidate && pCandidate != m_pCurrentSynth)
+			{
+				SwitchSynth(Candidates[i]);
+				break;
+			}
+		}
 	}
 	else if (Event.Button == TButton::Button2 && !Event.bRepeat)
 	{
 		if (m_pCurrentSynth == m_pMT32Synth)
 			NextMT32ROMSet();
-		else
+		else if (m_pCurrentSynth == m_pSoundFontSynth)
 		{
 			// Next SoundFont
 			const size_t nSoundFonts = m_pSoundFontSynth->GetSoundFontManager().GetSoundFontCount();
@@ -1149,13 +1218,25 @@ void CMT32Pi::ProcessButtonEvent(const TButtonEvent& Event)
 void CMT32Pi::SwitchSynth(TSynth NewSynth)
 {
 	CSynthBase* pNewSynth = nullptr;
+	const char* pMode = "Unknown mode";
 
 	if (NewSynth == TSynth::MT32)
+	{
 		pNewSynth = m_pMT32Synth;
+		pMode = "MT-32 mode";
+	}
 	else if (NewSynth == TSynth::SoundFont)
+	{
 		pNewSynth = m_pSoundFontSynth;
+		pMode = "SoundFont mode";
+	}
+	else if (NewSynth == TSynth::SC55)
+	{
+		pNewSynth = m_pSC55Synth;
+		pMode = "SC-55 mode";
+	}
 
-	if (pNewSynth == nullptr)
+	if (!pNewSynth)
 	{
 		LCDLog(TLCDLogType::Warning, "Synth unavailable!");
 		return;
@@ -1167,11 +1248,15 @@ void CMT32Pi::SwitchSynth(TSynth NewSynth)
 		return;
 	}
 
-	m_pCurrentSynth->AllSoundOff();
+	if (m_pCurrentSynth)
+		m_pCurrentSynth->AllSoundOff();
+
 	m_pCurrentSynth = pNewSynth;
-	const char* pMode = NewSynth == TSynth::MT32 ? "MT-32 mode" : "SoundFont mode";
+	m_pCurrentSynth->SetMasterVolume(m_nMasterVolume);
+
 	LOGNOTE("Switching to %s", pMode);
 	LCDLog(TLCDLogType::Notice, pMode);
+	m_pCurrentSynth->ReportStatus();
 }
 
 void CMT32Pi::SwitchMT32ROMSet(TMT32ROMSet ROMSet)
@@ -1229,11 +1314,22 @@ void CMT32Pi::SetMasterVolume(s32 nVolume)
 
 	if (m_pMT32Synth)
 		m_pMT32Synth->SetMasterVolume(m_nMasterVolume);
+
 	if (m_pSoundFontSynth)
 		m_pSoundFontSynth->SetMasterVolume(m_nMasterVolume);
 
-	if (m_pCurrentSynth == m_pSoundFontSynth)
-		LCDLog(TLCDLogType::Notice, "Volume: %d", m_nMasterVolume);
+	if (m_pSC55Synth)
+		m_pSC55Synth->SetMasterVolume(m_nMasterVolume);
+
+	if (m_pCurrentSynth == m_pSoundFontSynth ||
+	    m_pCurrentSynth == m_pSC55Synth)
+	{
+		LCDLog(
+			TLCDLogType::Notice,
+			"Volume: %d",
+			m_nMasterVolume
+		);
+	}
 }
 
 void CMT32Pi::LEDOn()
