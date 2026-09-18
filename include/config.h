@@ -29,6 +29,7 @@
 #include "control/rotaryencoder.h"
 #include "lcd/drivers/ssd1306.h"
 #include "synth/mt32romset.h"
+#include "synth/sc55model.h"
 #include "synth/mt32synth.h"
 #include "utility.h"
 
@@ -39,6 +40,10 @@ public:
 		ENUM(MT32, mt32)                  \
 		ENUM(SoundFont, soundfont)        \
                 ENUM(SC55, sc55)
+
+        #define ENUM_SC55MODEL(ENUM) \
+                ENUM(MK2, mk2)          \
+                ENUM(MK1, mk1)
 
 	#define ENUM_AUDIOOUTPUTDEVICE(ENUM) \
 		ENUM(PWM, pwm)                   \
@@ -72,6 +77,7 @@ public:
 		ENUM(WiFi, wifi)
 
 	CONFIG_ENUM(TSystemDefaultSynth, ENUM_SYSTEMDEFAULTSYNTH);
+        CONFIG_ENUM(TSC55Model, ENUM_SC55MODEL);
 	CONFIG_ENUM(TAudioOutputDevice, ENUM_AUDIOOUTPUTDEVICE);
 	CONFIG_ENUM(TControlScheme, ENUM_CONTROLSCHEME);
 	CONFIG_ENUM(TLCDType, ENUM_LCDTYPE);
@@ -93,6 +99,7 @@ public:
 	static bool ParseOption(const char *pString, CString* pOut);
 	static bool ParseOption(const char *pString, CIPAddress* pOut);
 	static bool ParseOption(const char* pString, TSystemDefaultSynth* pOut);
+        static bool ParseOption(const char* pString, TSC55Model* pOut);
 	static bool ParseOption(const char* pString, TAudioOutputDevice* pOut);
 	static bool ParseOption(const char* pString, TMT32EmuResamplerQuality* pOut);
 	static bool ParseOption(const char* pString, TMT32EmuMIDIChannels* pOut);

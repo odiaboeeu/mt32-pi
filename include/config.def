@@ -44,6 +44,7 @@ CFG(power_save_timeout,		int,				SystemPowerSaveTimeout,			300						)
 END_SECTION
 
 BEGIN_SECTION(sc55)
+CFG(model,                      TSC55Model,                     SC55Model,                              TSC55Model::MK2                                 )
 CFG(debug,                      bool,                           SC55Debug,                              false                                           )
 END_SECTION
 
