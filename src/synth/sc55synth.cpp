@@ -42,6 +42,13 @@ extern "C"
                 const unsigned char* waverom2_data, unsigned int waverom2_size,
                 const unsigned char* rom_sm_data, unsigned int rom_sm_size);
 
+        int SC55_HeadlessLoadMk1RomSetFromMemory(
+                const unsigned char* rom1_data, unsigned int rom1_size,
+                const unsigned char* rom2_data, unsigned int rom2_size,
+                const unsigned char* waverom1_data, unsigned int waverom1_size,
+                const unsigned char* waverom2_data, unsigned int waverom2_size,
+                const unsigned char* waverom3_data, unsigned int waverom3_size);
+
         int SC55_HeadlessOpenAudio(int pageSize, int pageNum);
         void SC55_HeadlessCloseAudio(void);
         void SC55_HeadlessInit(void);
@@ -55,7 +62,6 @@ extern "C"
 
 namespace
 {
-        constexpr unsigned SC55NativeSampleRate = 66207;
         constexpr size_t SC55RingFrames = 131072;
         constexpr size_t SC55PrebufferFrames = 32768;
 
@@ -167,6 +173,7 @@ private:
 extern "C" void SC55_LinkProbe(void)
 {
         volatile auto p0 = (void*)SC55_HeadlessLoadMk2RomSetFromMemory;
+        volatile auto p0mk1 = (void*)SC55_HeadlessLoadMk1RomSetFromMemory;
         volatile auto p1 = (void*)SC55_HeadlessOpenAudio;
         volatile auto p2 = (void*)SC55_HeadlessCloseAudio;
         volatile auto p3 = (void*)SC55_HeadlessInit;
@@ -176,6 +183,7 @@ extern "C" void SC55_LinkProbe(void)
         volatile auto p7 = (void*)SC55_HeadlessPopSample;
 
         (void)p0;
+        (void)p0mk1;
         (void)p1;
         (void)p2;
         (void)p3;
@@ -185,11 +193,18 @@ extern "C" void SC55_LinkProbe(void)
         (void)p7;
 }
 
-CSC55Synth::CSC55Synth(unsigned nSampleRate, bool bDebug)
+CSC55Synth::CSC55Synth(
+        unsigned nSampleRate,
+        TSC55Model Model,
+        bool bDebug)
         : CSynthBase(nSampleRate),
           m_pProducerTask(nullptr),
           m_bProducerRunning(false),
           m_bInitialized(false),
+          m_Model(Model),
+          m_nNativeSampleRate(
+              Model == TSC55Model::MK1 ? 64000 : 66207
+          ),
           m_bDebug(bDebug),
           m_nVolume(100)
 {
@@ -268,42 +283,134 @@ bool CSC55Synth::Initialize()
                 SC55SDLog("SC55 sample rate 32000");
         else if (m_nSampleRate == 48000)
                 SC55SDLog("SC55 sample rate 48000");
-        else if (m_nSampleRate == 66207)
-                SC55SDLog("SC55 sample rate 66207");
         else
                 SC55SDLog("SC55 sample rate other");
+
+        if (m_nNativeSampleRate == 64000)
+                SC55SDLog("SC55 native rate 64000");
+        else
+                SC55SDLog("SC55 native rate 66207");
+
         u8* pROM1 = nullptr;
         u8* pROM2 = nullptr;
         u8* pWaveROM1 = nullptr;
         u8* pWaveROM2 = nullptr;
+        u8* pWaveROM3 = nullptr;
         u8* pROMSM = nullptr;
 
         unsigned int nROM1Size = 0;
         unsigned int nROM2Size = 0;
         unsigned int nWaveROM1Size = 0;
         unsigned int nWaveROM2Size = 0;
+        unsigned int nWaveROM3Size = 0;
         unsigned int nROMSMSize = 0;
 
-        bool bOK =
-                LoadROMFile("roms/sc55/rom1.bin", pROM1, nROM1Size) &&
-                LoadROMFile("roms/sc55/rom2.bin", pROM2, nROM2Size) &&
-                LoadROMFile("roms/sc55/waverom1.bin", pWaveROM1, nWaveROM1Size) &&
-                LoadROMFile("roms/sc55/waverom2.bin", pWaveROM2, nWaveROM2Size) &&
-                LoadROMFile("roms/sc55/rom_sm.bin", pROMSM, nROMSMSize);
+        bool bOK = false;
 
-        if (bOK)
+        if (m_Model == TSC55Model::MK1)
         {
-                bOK = SC55_HeadlessLoadMk2RomSetFromMemory(
-                        pROM1, nROM1Size,
-                        pROM2, nROM2Size,
-                        pWaveROM1, nWaveROM1Size,
-                        pWaveROM2, nWaveROM2Size,
-                        pROMSM, nROMSMSize);
+                bOK =
+                        LoadROMFile(
+                                "roms/sc55/mk1/rom1.bin",
+                                pROM1,
+                                nROM1Size
+                        ) &&
+                        LoadROMFile(
+                                "roms/sc55/mk1/rom2.bin",
+                                pROM2,
+                                nROM2Size
+                        ) &&
+                        LoadROMFile(
+                                "roms/sc55/mk1/waverom1.bin",
+                                pWaveROM1,
+                                nWaveROM1Size
+                        ) &&
+                        LoadROMFile(
+                                "roms/sc55/mk1/waverom2.bin",
+                                pWaveROM2,
+                                nWaveROM2Size
+                        ) &&
+                        LoadROMFile(
+                                "roms/sc55/mk1/waverom3.bin",
+                                pWaveROM3,
+                                nWaveROM3Size
+                        );
 
-                if (!bOK)
+                if (bOK)
                 {
-                        LOGERR("SC55_HeadlessLoadMk2RomSetFromMemory failed");
-                        SC55SDLog("SC55 LoadMk2 failed");
+                        bOK = SC55_HeadlessLoadMk1RomSetFromMemory(
+                                pROM1,
+                                nROM1Size,
+                                pROM2,
+                                nROM2Size,
+                                pWaveROM1,
+                                nWaveROM1Size,
+                                pWaveROM2,
+                                nWaveROM2Size,
+                                pWaveROM3,
+                                nWaveROM3Size
+                        );
+
+                        if (!bOK)
+                        {
+                                LOGERR(
+                                        "SC55_HeadlessLoadMk1RomSetFromMemory failed"
+                                );
+                                SC55SDLog("SC55 LoadMk1 failed");
+                        }
+                }
+        }
+        else
+        {
+                bOK =
+                        LoadROMFile(
+                                "roms/sc55/mk2/rom1.bin",
+                                pROM1,
+                                nROM1Size
+                        ) &&
+                        LoadROMFile(
+                                "roms/sc55/mk2/rom2.bin",
+                                pROM2,
+                                nROM2Size
+                        ) &&
+                        LoadROMFile(
+                                "roms/sc55/mk2/waverom1.bin",
+                                pWaveROM1,
+                                nWaveROM1Size
+                        ) &&
+                        LoadROMFile(
+                                "roms/sc55/mk2/waverom2.bin",
+                                pWaveROM2,
+                                nWaveROM2Size
+                        ) &&
+                        LoadROMFile(
+                                "roms/sc55/mk2/rom_sm.bin",
+                                pROMSM,
+                                nROMSMSize
+                        );
+
+                if (bOK)
+                {
+                        bOK = SC55_HeadlessLoadMk2RomSetFromMemory(
+                                pROM1,
+                                nROM1Size,
+                                pROM2,
+                                nROM2Size,
+                                pWaveROM1,
+                                nWaveROM1Size,
+                                pWaveROM2,
+                                nWaveROM2Size,
+                                pROMSM,
+                                nROMSMSize
+                        );
+
+                        if (!bOK)
+                        {
+                                LOGERR(
+                                        "SC55_HeadlessLoadMk2RomSetFromMemory failed"
+                                );
+                                SC55SDLog("SC55 LoadMk2 failed");
+                        }
                 }
         }
 
@@ -311,6 +418,7 @@ bool CSC55Synth::Initialize()
         FreeROMBuffer(pROM2);
         FreeROMBuffer(pWaveROM1);
         FreeROMBuffer(pWaveROM2);
+        FreeROMBuffer(pWaveROM3);
         FreeROMBuffer(pROMSM);
 
         if (!bOK)
@@ -324,7 +432,6 @@ bool CSC55Synth::Initialize()
         }
 
         SC55_HeadlessInit();
-
         SC55RingClear();
 
         m_bInitialized = true;
@@ -336,8 +443,12 @@ bool CSC55Synth::Initialize()
 
         // Producer runs on the dedicated physical Core 3.
         m_pProducerTask = nullptr;
-        SC55SDLog("SC55 producer assigned to Core 3");
-        LOGNOTE("Experimental Nuked-SC55 initialized");
+
+        if (m_Model == TSC55Model::MK1)
+                LOGNOTE("Experimental Nuked-SC55mkI initialized");
+        else
+                LOGNOTE("Experimental Nuked-SC55mkII initialized");
+
         SC55SDLog("SC55 initialized OK");
         return true;
 }
@@ -497,14 +608,13 @@ size_t CSC55Synth::Render(s16* pOutBuffer, size_t nFrames)
         for (size_t step = 0; step < nFrames * SC55StepsPerOutputFrame; ++step)
                 SC55_HeadlessRunStep();
 
-        constexpr unsigned SC55NativeSampleRate = 66207;
         static unsigned s_nAccumulator = 0;
         static short s_LastLeft = 0;
         static short s_LastRight = 0;
 
         for (size_t i = 0; i < nFrames; ++i)
         {
-                s_nAccumulator += SC55NativeSampleRate;
+                s_nAccumulator += m_nNativeSampleRate;
 
                 bool bGotSample = false;
 
@@ -575,7 +685,7 @@ size_t CSC55Synth::Render(float* pOutBuffer, size_t nFrames)
 
         for (size_t i = 0; i < nFrames; ++i)
         {
-                g_SC55ResampleAccumulator += SC55NativeSampleRate;
+                g_SC55ResampleAccumulator += m_nNativeSampleRate;
 
                 while (g_SC55ResampleAccumulator >= m_nSampleRate)
                 {
@@ -612,15 +722,25 @@ size_t CSC55Synth::Render(float* pOutBuffer, size_t nFrames)
 
 void CSC55Synth::ReportStatus() const
 {
-        if (m_pUI)
-                m_pUI->ShowSystemMessage("Nuked-SC55");
+        if (!m_pUI)
+                return;
+
+        if (m_Model == TSC55Model::MK1)
+                m_pUI->ShowSystemMessage("Nuked-SC55mkI");
+        else
+                m_pUI->ShowSystemMessage("Nuked-SC55mkII");
 }
 
 void CSC55Synth::UpdateLCD(CLCD& LCD, unsigned int nTicks)
 {
         if (!m_bDebug)
         {
-                LCD.Print("SC-55mkII", 0, 0, true, false);
+                const char* pModelName =
+                    m_Model == TSC55Model::MK1
+                        ? "SC-55"
+                        : "SC-55mkII";
+
+                LCD.Print(pModelName, 0, 0, true, false);
                 LCD.Print("Ready", 0, 1, true, false);
                 return;
         }

@@ -437,6 +437,7 @@ bool CMT32Pi::InitSC55Synth()
 
         m_pSC55Synth = new CSC55Synth(
                 m_pConfig->AudioSampleRate,
+                m_pConfig->SC55Model,
                 m_pConfig->SC55Debug
         );
         if (!m_pSC55Synth->Initialize())
