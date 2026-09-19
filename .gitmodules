@@ -16,4 +16,4 @@
 	ignore = dirty
 [submodule "external/Nuked-SC55"]
 	path = external/Nuked-SC55
-	url = /home/suporte/Nuked-SC55
+	url = git@github.com:odiaboeeu/Nuked-SC55.git
