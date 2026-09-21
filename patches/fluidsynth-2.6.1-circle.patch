@@ -1,0 +1,186 @@
+diff --git a/src/drivers/fluid_audio_convert.h b/src/drivers/fluid_audio_convert.h
+index 3a205051..461c4c1f 100644
+--- a/src/drivers/fluid_audio_convert.h
++++ b/src/drivers/fluid_audio_convert.h
+@@ -65,11 +65,19 @@ T round_clip_to(float x)
+         // Implicit conversion from 'int' to 'float' changes value from 2147483647 to 2147483648.0f
+         // Hence, adjust fmax to 2147483520.0f to prevent integer overflow when attempting to cast 2147483648.0f to int32_t below.
+         // Same for 4294967295 to 4294967296.0f for uint32_t.
+-        fmax = std::nextafter(fmax, 0.0f);
++        fmax = static_cast<float>(::nextafter(fmax, 0.0));
+     }
+ 
+-    x = std::round(x);
+-    x = std::clamp(x, fmin, fmax);
++    x = static_cast<float>(::round(x));
++
++    if(x < fmin)
++    {
++        x = fmin;
++    }
++    else if(x > fmax)
++    {
++        x = fmax;
++    }
+ 
+     T i = static_cast<T>(x);
+     return i;
+diff --git a/src/sfloader/fluid_sfont.c b/src/sfloader/fluid_sfont.c
+index a4814bca..6bce87a0 100644
+--- a/src/sfloader/fluid_sfont.c
++++ b/src/sfloader/fluid_sfont.c
+@@ -21,39 +21,27 @@
+ #include "fluid_sys.h"
+ #include "fluid_mod.h"
+ 
++void *default_fopen(const char *path);
++int default_fclose(void *handle);
++fluid_long_long_t default_ftell(void *handle);
++int safe_fread(void *buf, fluid_long_long_t count, void *handle);
++int safe_fseek(void *handle, fluid_long_long_t ofs, int whence);
+ 
+-void *default_fopen(const char *path)
+-{
+-    const char* msg;
+-    FILE* handle = fluid_file_open(path, &msg);
+ 
+-    if(handle == NULL)
+-    {
+-        FLUID_LOG(FLUID_ERR, "fluid_sfloader_load(): Failed to open '%s': %s", path, msg);
+-    }
++/* mt32-pi: default_fopen provided externally */
+ 
+-    return handle;
+-}
+ 
+-int default_fclose(void *handle)
+-{
+-    return FLUID_FCLOSE((FILE *)handle) == 0 ? FLUID_OK : FLUID_FAILED;
+-}
++/* mt32-pi: default_fclose provided externally */
+ 
+-fluid_long_long_t default_ftell(void *handle)
+-{
+-    return FLUID_FTELL((FILE *)handle);
+-}
+ 
+-int safe_fread(void *buf, fluid_long_long_t count, void *handle)
+-{
+-    return fluid_file_read(buf, count, handle);
+-}
++/* mt32-pi: default_ftell provided externally */
++
++
++/* mt32-pi: safe_fread provided externally */
++
++
++/* mt32-pi: safe_fseek provided externally */
+ 
+-int safe_fseek(void *handle, fluid_long_long_t ofs, int whence)
+-{
+-    return fluid_file_seek(handle, ofs, whence);
+-}
+ 
+ /**
+  * Creates a new SoundFont loader.
+diff --git a/src/utils/fluid_sys.c b/src/utils/fluid_sys.c
+index b4137b3d..2ec8e363 100644
+--- a/src/utils/fluid_sys.c
++++ b/src/utils/fluid_sys.c
+@@ -231,28 +231,8 @@ fluid_log(int level, const char *fmt, ...)
+     return FLUID_FAILED;
+ }
+ 
+-void* fluid_alloc(size_t len)
+-{
+-    void* ptr = malloc(len);
++/* mt32-pi: fluid_alloc provided externally */
+ 
+-#if defined(DEBUG) && !defined(_MSC_VER)
+-    // garbage initialize allocated memory for debug builds to ease reproducing
+-    // bugs like 44453ff23281b3318abbe432fda90888c373022b .
+-    //
+-    // MSVC++ already garbage initializes allocated memory by itself (debug-heap).
+-    //
+-    // 0xCC because
+-    // * it makes pointers reliably crash when dereferencing them,
+-    // * floating points are still some valid but insanely huge negative number, and
+-    // * if for whatever reason this allocated memory is executed, it'll trigger
+-    //   INT3 (...at least on x86)
+-    if(ptr != NULL)
+-    {
+-        memset(ptr, 0xCC, len);
+-    }
+-#endif
+-    return ptr;
+-}
+ 
+ /**
+  * Open a file with a UTF-8 string, even in Windows
+@@ -311,23 +291,8 @@ error_recovery:
+ #endif
+ }
+ 
+-/**
+- * Wrapper for free() that satisfies at least C90 requirements.
+- *
+- * @param ptr Pointer to memory region that should be freed
+- *
+- * @note Only use this function when the API documentation explicitly says so. Otherwise use
+- * adequate \c delete_fluid_* functions.
+- *
+- * @warning Calling C-std lib <code>free()</code> on memory that is advised to be freed with fluid_free() results in undefined behaviour!
+- * (cf.: "Potential Errors Passing CRT Objects Across DLL Boundaries" found in MS Docs)
+- *
+- * @since 2.0.7
+- */
+-void fluid_free(void* ptr)
+-{
+-    free(ptr);
+-}
++/* mt32-pi: fluid_free provided externally */
++
+ 
+ /**
+  * An improved strtok, still trashes the input string, but is portable and
+@@ -1745,38 +1710,8 @@ void delete_fluid_server_socket(fluid_server_socket_t *server_socket)
+ 
+ #endif // NETWORK_SUPPORT
+ 
+-FILE* fluid_file_open(const char* path, const char** errMsg)
+-{
+-    static const char ErrExist[] = "File does not exist.";
+-    static const char ErrRegular[] = "File is not regular, refusing to open it.";
+-    static const char ErrNull[] = "File does not exists or insufficient permissions to open it.";
+-    
+-    FILE* handle = NULL;
+-    
+-    if(!fluid_file_test(path, FLUID_FILE_TEST_EXISTS))
+-    {
+-        if(errMsg != NULL)
+-        {
+-            *errMsg = ErrExist;
+-        }
+-    }
+-    else if(!fluid_file_test(path, FLUID_FILE_TEST_IS_REGULAR))
+-    {
+-        if(errMsg != NULL)
+-        {
+-            *errMsg = ErrRegular;
+-        }
+-    }
+-    else if((handle = FLUID_FOPEN(path, "rb")) == NULL)
+-    {
+-        if(errMsg != NULL)
+-        {
+-            *errMsg = ErrNull;
+-        }
+-    }
+-    
+-    return handle;
+-}
++/* mt32-pi: fluid_file_open provided externally */
++
+ 
+ fluid_long_long_t fluid_file_tell(FILE* f)
+ {

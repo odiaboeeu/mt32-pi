@@ -94,7 +94,7 @@ $(MT32EMUBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 fluidsynth: $(FLUIDSYNTHBUILDDIR)/.done
 
 $(FLUIDSYNTHBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
-	@${APPLY_PATCH} $(FLUIDSYNTHHOME) patches/fluidsynth-2.5.4-circle.patch
+	@${APPLY_PATCH} $(FLUIDSYNTHHOME) patches/fluidsynth-2.6.1-circle.patch
 
 	@CFLAGS="$(CFLAGS_EXTERNAL)" \
 	cmake -B $(FLUIDSYNTHBUILDDIR) \
@@ -111,7 +111,6 @@ $(FLUIDSYNTHBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 		 -Denable-ipv6=OFF \
 		 -Denable-jack=OFF \
 		 -Denable-ladspa=OFF \
-		 -Denable-libinstpatch=OFF \
 		 -Denable-native-dls=OFF \
 		 -Denable-libsndfile=OFF \
 		 -Denable-midishare=OFF \
@@ -124,6 +123,7 @@ $(FLUIDSYNTHBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 		 -Denable-pulseaudio=OFF \
 		 -Denable-readline=OFF \
 		 -Denable-sdl3=OFF \
+		 -Denable-signalsmith=OFF \
 		 -Denable-threads=OFF \
 		 -Denable-waveout=OFF \
 		 -Denable-winmidi=OFF \
@@ -149,7 +149,7 @@ clean:
 #
 mrproper: clean
 # Reverse patches
-	@${REVERSE_PATCH} $(FLUIDSYNTHHOME) patches/fluidsynth-2.5.4-circle.patch
+	@${REVERSE_PATCH} $(FLUIDSYNTHHOME) patches/fluidsynth-2.6.1-circle.patch
 
 # Clean circle-stdlib
 	@if [ -f $(CIRCLE_STDLIB_CONFIG) ]; then $(MAKE) -C $(CIRCLESTDLIBHOME) mrproper; fi
