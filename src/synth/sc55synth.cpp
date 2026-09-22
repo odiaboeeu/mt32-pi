@@ -735,13 +735,28 @@ void CSC55Synth::UpdateLCD(CLCD& LCD, unsigned int nTicks)
 {
         if (!m_bDebug)
         {
-                const char* pModelName =
-                    m_Model == TSC55Model::MK1
-                        ? "SC-55"
-                        : "SC-55mkII";
+                const u8 nBarHeight = LCD.Height();
+                float ChannelLevels[16];
+                float PeakLevels[16];
 
-                LCD.Print(pModelName, 0, 0, true, false);
-                LCD.Print("Ready", 0, 1, true, false);
+                constexpr u16 PercussionMask = 1 << 9;
+
+                m_MIDIMonitor.GetChannelLevels(
+                    nTicks,
+                    ChannelLevels,
+                    PeakLevels,
+                    PercussionMask
+                );
+
+                CUserInterface::DrawChannelLevels(
+                    LCD,
+                    nBarHeight,
+                    ChannelLevels,
+                    PeakLevels,
+                    10,
+                    true
+                );
+
                 return;
         }
 
