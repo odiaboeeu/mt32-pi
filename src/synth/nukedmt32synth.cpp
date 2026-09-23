@@ -164,6 +164,15 @@ bool CNukedMT32Synth::Initialize()
     );
     m_LCDText[sizeof(m_LCDText) - 1] = '\0';
 
+    if (m_nSampleRate != NativeSampleRate)
+    {
+        LOGWARN(
+            "Native audio requires %u Hz; configured output is %u Hz",
+            NativeSampleRate,
+            m_nSampleRate
+        );
+    }
+
     m_bInitialized = true;
 
     LOGNOTE(
@@ -264,12 +273,64 @@ void CNukedMT32Synth::SetMasterVolume(u8 nVolume)
     m_nMasterVolume = nVolume;
 }
 
+size_t CNukedMT32Synth::RenderNative(
+    s16* pOutBuffer,
+    size_t nFrames
+)
+{
+    if (!pOutBuffer || !m_bInitialized)
+        return 0;
+
+    size_t nRendered = 0;
+
+    while (nRendered < nFrames)
+    {
+        size_t nChunk = nFrames - nRendered;
+
+        if (nChunk > NativeBufferFrames)
+            nChunk = NativeBufferFrames;
+
+        m_pMT32->clock(nChunk);
+
+        m_pReverb->process(
+            &m_pMT32->samples[0][0],
+            static_cast<int>(nChunk)
+        );
+
+        std::memcpy(
+            pOutBuffer + nRendered * 2,
+            &m_pMT32->samples[0][0],
+            nChunk * 2 * sizeof(*pOutBuffer)
+        );
+
+        nRendered += nChunk;
+    }
+
+    return nRendered;
+}
+
 size_t CNukedMT32Synth::Render(
     s16* pOutBuffer,
     size_t nFrames
 )
 {
-    if (pOutBuffer)
+    if (!pOutBuffer)
+        return nFrames;
+
+    m_Lock.Acquire();
+
+    if (m_nSampleRate == NativeSampleRate)
+    {
+        if (RenderNative(pOutBuffer, nFrames) != nFrames)
+        {
+            std::memset(
+                pOutBuffer,
+                0,
+                nFrames * 2 * sizeof(*pOutBuffer)
+            );
+        }
+    }
+    else
     {
         std::memset(
             pOutBuffer,
@@ -277,6 +338,8 @@ size_t CNukedMT32Synth::Render(
             nFrames * 2 * sizeof(*pOutBuffer)
         );
     }
+
+    m_Lock.Release();
 
     return nFrames;
 }
@@ -286,14 +349,57 @@ size_t CNukedMT32Synth::Render(
     size_t nFrames
 )
 {
-    if (pOutBuffer)
+    if (!pOutBuffer)
+        return nFrames;
+
+    m_Lock.Acquire();
+
+    if (!m_bInitialized ||
+        m_nSampleRate != NativeSampleRate)
     {
         std::memset(
             pOutBuffer,
             0,
             nFrames * 2 * sizeof(*pOutBuffer)
         );
+
+        m_Lock.Release();
+        return nFrames;
     }
+
+    size_t nRendered = 0;
+
+    while (nRendered < nFrames)
+    {
+        size_t nChunk = nFrames - nRendered;
+
+        if (nChunk > NativeBufferFrames)
+            nChunk = NativeBufferFrames;
+
+        m_pMT32->clock(nChunk);
+
+        m_pReverb->process(
+            &m_pMT32->samples[0][0],
+            static_cast<int>(nChunk)
+        );
+
+        for (size_t i = 0; i < nChunk; ++i)
+        {
+            pOutBuffer[(nRendered + i) * 2] =
+                static_cast<float>(
+                    m_pMT32->samples[i][0]
+                ) / 32768.0f;
+
+            pOutBuffer[(nRendered + i) * 2 + 1] =
+                static_cast<float>(
+                    m_pMT32->samples[i][1]
+                ) / 32768.0f;
+        }
+
+        nRendered += nChunk;
+    }
+
+    m_Lock.Release();
 
     return nFrames;
 }
@@ -310,6 +416,24 @@ void CNukedMT32Synth::UpdateLCD(
 )
 {
     (void)nTicks;
+
+    if (m_bInitialized && m_pMT32->lcd_is_on())
+    {
+        const u8* const pText = m_pMT32->lcd_text();
+
+        for (size_t i = 0; i < LCDTextLength; ++i)
+        {
+            const u8 nCharacter = pText[i];
+
+            m_LCDText[i] =
+                nCharacter >= 0x20 &&
+                nCharacter < 0x7F
+                    ? static_cast<char>(nCharacter)
+                    : ' ';
+        }
+
+        m_LCDText[LCDTextLength] = '\0';
+    }
 
     const u8 nStatusRow =
         LCD.GetType() == CLCD::TType::Character

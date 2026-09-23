@@ -45,6 +45,8 @@ public:
     }
 
 private:
+    static constexpr unsigned int NativeSampleRate = 32000;
+    static constexpr size_t NativeBufferFrames = 8192;
     static constexpr size_t OldControlROMSize = 0x10000;
     static constexpr size_t NewControlROMSize = 0x20000;
     static constexpr size_t PCMROMSize = 0x80000;
@@ -53,6 +55,7 @@ private:
     static unsigned int GetShortMessageLength(u8 nStatus);
 
     void PostMIDIByte(u8 nByte);
+    size_t RenderNative(s16* pOutBuffer, size_t nFrames);
     void ClearSynth();
 
     mt32_t* m_pMT32;
