@@ -28,6 +28,7 @@ enum class TSynth
 	MT32,
 	SoundFont,
         SC55,
+        NukedMT32,
 };
 
 #endif

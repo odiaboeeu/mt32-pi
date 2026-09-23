@@ -120,6 +120,7 @@ CMT32Pi::CMT32Pi(CI2CMaster* pI2CMaster, CSPIMaster* pSPIMaster, CInterruptSyste
 	  m_nMasterVolume(100),
 	  m_pCurrentSynth(nullptr),
 	  m_pMT32Synth(nullptr),
+	  m_pNukedMT32Synth(nullptr),
 	  m_pSoundFontSynth(nullptr),
         m_pSC55Synth(nullptr)
 {
@@ -274,6 +275,9 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	LCDLog(TLCDLogType::Startup, "Init mt32emu");
 	InitMT32Synth();
 
+	LCDLog(TLCDLogType::Startup, "Init Nuked-MT32");
+	InitNukedMT32Synth();
+
 	LCDLog(TLCDLogType::Startup, "Init FluidSynth");
 	InitSoundFontSynth();
 
@@ -295,6 +299,10 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 	case CConfig::TSystemDefaultSynth::SC55:
 		m_pCurrentSynth = m_pSC55Synth;
 		break;
+
+	case CConfig::TSystemDefaultSynth::NukedMT32:
+		m_pCurrentSynth = m_pNukedMT32Synth;
+		break;
 	}
 
 	if (!m_pCurrentSynth)
@@ -307,6 +315,8 @@ bool CMT32Pi::Initialize(bool bSerialMIDIAvailable)
 			m_pCurrentSynth = m_pSoundFontSynth;
 		else if (m_pSC55Synth)
 			m_pCurrentSynth = m_pSC55Synth;
+		else if (m_pNukedMT32Synth)
+			m_pCurrentSynth = m_pNukedMT32Synth;
 		else
 		{
 			LOGPANIC("No synths available");
@@ -407,6 +417,30 @@ bool CMT32Pi::InitMT32Synth()
 	m_pMT32Synth->SetReversedStereo(m_pConfig->MT32EmuReversedStereo);
 
 	m_pMT32Synth->SetUserInterface(&m_UserInterface);
+
+	return true;
+}
+
+bool CMT32Pi::InitNukedMT32Synth()
+{
+	assert(m_pNukedMT32Synth == nullptr);
+
+	m_pNukedMT32Synth =
+		new CNukedMT32Synth(m_pConfig->AudioSampleRate);
+
+	if (!m_pNukedMT32Synth->Initialize())
+	{
+		LOGWARN("Nuked-MT32 init failed; compatible ROMs present?");
+
+		delete m_pNukedMT32Synth;
+		m_pNukedMT32Synth = nullptr;
+
+		return false;
+	}
+
+	m_pNukedMT32Synth->SetUserInterface(&m_UserInterface);
+
+	LOGNOTE("Nuked-MT32 initialized and available");
 
 	return true;
 }
@@ -574,13 +608,27 @@ void CMT32Pi::UITask()
 		{
 			TMisterStatus Status{TMisterSynth::Unknown, 0xFF, 0xFF};
 
-			if (m_pCurrentSynth == m_pMT32Synth)
+			if (m_pCurrentSynth == m_pMT32Synth ||
+			    m_pCurrentSynth == m_pNukedMT32Synth)
 				Status.Synth = TMisterSynth::MT32;
 			else if (m_pCurrentSynth == m_pSoundFontSynth)
 				Status.Synth = TMisterSynth::SoundFont;
 
-			if (m_pMT32Synth)
-				Status.MT32ROMSet = static_cast<u8>(m_pMT32Synth->GetROMSet());
+			if (m_pCurrentSynth == m_pNukedMT32Synth &&
+			    m_pNukedMT32Synth)
+			{
+				Status.MT32ROMSet =
+					static_cast<u8>(
+						m_pNukedMT32Synth->GetROMSet()
+					);
+			}
+			else if (m_pMT32Synth)
+			{
+				Status.MT32ROMSet =
+					static_cast<u8>(
+						m_pMT32Synth->GetROMSet()
+					);
+			}
 
 			if (m_pSoundFontSynth)
 				Status.SoundFontIndex = m_pSoundFontSynth->GetSoundFontIndex();
@@ -1106,6 +1154,8 @@ void CMT32Pi::ProcessEventQueue()
 			case TEventType::AllSoundOff:
 				if (m_pMT32Synth)
 					m_pMT32Synth->AllSoundOff();
+				if (m_pNukedMT32Synth)
+					m_pNukedMT32Synth->AllSoundOff();
 				if (m_pSoundFontSynth)
 					m_pSoundFontSynth->AllSoundOff();
 				if (m_pSC55Synth)
@@ -1236,6 +1286,11 @@ void CMT32Pi::SwitchSynth(TSynth NewSynth)
 		pNewSynth = m_pSC55Synth;
 		pMode = "SC-55 mode";
 	}
+	else if (NewSynth == TSynth::NukedMT32)
+	{
+		pNewSynth = m_pNukedMT32Synth;
+		pMode = "Nuked-MT32 mode";
+	}
 
 	if (!pNewSynth)
 	{
@@ -1316,6 +1371,9 @@ void CMT32Pi::SetMasterVolume(s32 nVolume)
 	if (m_pMT32Synth)
 		m_pMT32Synth->SetMasterVolume(m_nMasterVolume);
 
+	if (m_pNukedMT32Synth)
+		m_pNukedMT32Synth->SetMasterVolume(m_nMasterVolume);
+
 	if (m_pSoundFontSynth)
 		m_pSoundFontSynth->SetMasterVolume(m_nMasterVolume);
 
@@ -1323,7 +1381,8 @@ void CMT32Pi::SetMasterVolume(s32 nVolume)
 		m_pSC55Synth->SetMasterVolume(m_nMasterVolume);
 
 	if (m_pCurrentSynth == m_pSoundFontSynth ||
-	    m_pCurrentSynth == m_pSC55Synth)
+	    m_pCurrentSynth == m_pSC55Synth ||
+	    m_pCurrentSynth == m_pNukedMT32Synth)
 	{
 		LCDLog(
 			TLCDLogType::Notice,

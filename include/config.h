@@ -39,7 +39,8 @@ public:
 	#define ENUM_SYSTEMDEFAULTSYNTH(ENUM) \
 		ENUM(MT32, mt32)                  \
 		ENUM(SoundFont, soundfont)        \
-                ENUM(SC55, sc55)
+                ENUM(SC55, sc55)                \
+                ENUM(NukedMT32, nuked_mt32)
 
         #define ENUM_SC55MODEL(ENUM) \
                 ENUM(MK2, mk2)          \

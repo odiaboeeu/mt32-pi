@@ -61,6 +61,7 @@
 #include "ringbuffer.h"
 #include "synth/mt32romset.h"
 #include "synth/mt32synth.h"
+#include "synth/nukedmt32synth.h"
 #include "synth/soundfontsynth.h"
 #include "synth/synth.h"
 
@@ -113,6 +114,7 @@ private:
 	// Initialization
 	bool InitNetwork();
 	bool InitMT32Synth();
+	bool InitNukedMT32Synth();
 	bool InitSoundFontSynth();
         bool InitSC55Synth();
 
@@ -215,6 +217,7 @@ private:
 	u8 m_nMasterVolume;
 	CSynthBase* m_pCurrentSynth;
 	CMT32Synth* m_pMT32Synth;
+	CNukedMT32Synth* m_pNukedMT32Synth;
 	CSoundFontSynth* m_pSoundFontSynth;
         CSC55Synth* m_pSC55Synth;
 
