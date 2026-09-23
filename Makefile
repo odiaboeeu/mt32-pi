@@ -5,7 +5,7 @@
 include Config.mk
 
 .DEFAULT_GOAL=all
-.PHONY: submodules circle-stdlib mt32emu fluidsynth all clean veryclean
+.PHONY: submodules circle-stdlib mt32emu nuked-mt32 fluidsynth all clean veryclean
 
 #
 # Functions to apply/reverse patches only if not completely applied/reversed already
@@ -89,6 +89,15 @@ $(MT32EMUBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 	@touch $@
 
 #
+# Build Nuked-MT32 bare-metal core
+#
+nuked-mt32: $(NUKEDMT32BUILDDIR)/.done
+
+$(NUKEDMT32BUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
+	@./build-nuked-mt32-core-pi4.sh
+	@touch $@
+
+#
 # Build FluidSynth
 #
 fluidsynth: $(FLUIDSYNTHBUILDDIR)/.done
@@ -135,7 +144,7 @@ $(FLUIDSYNTHBUILDDIR)/.done: $(CIRCLESTDLIBHOME)/.done
 #
 # Build kernel itself
 #
-all: circle-stdlib mt32emu fluidsynth
+all: circle-stdlib mt32emu nuked-mt32 fluidsynth
 	@$(MAKE) -f Kernel.mk $(KERNEL).img $(KERNEL).hex
 
 #
@@ -160,3 +169,6 @@ mrproper: clean
 
 # Clean FluidSynth
 	@$(RM) -r $(FLUIDSYNTHBUILDDIR)
+
+# Clean Nuked-MT32
+	@$(RM) -r $(NUKEDMT32BUILDDIR)

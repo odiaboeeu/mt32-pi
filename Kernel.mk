@@ -92,6 +92,11 @@ endif
 INCLUDE		+=	-I $(MT32EMUBUILDDIR)/include
 EXTRALIBS	+=	$(MT32EMULIB)
 
+# Experimental Nuked-MT32 bare-metal core
+INCLUDE		+=	-I $(NUKEDMT32HOME) \
+			-I $(NUKEDMT32HOME)/munt
+EXTRALIBS	+=	--whole-archive $(NUKEDMT32LIB) --no-whole-archive
+
 INCLUDE		+=	-I $(FLUIDSYNTHBUILDDIR)/include \
 			-I $(FLUIDSYNTHHOME)/include
 EXTRALIBS	+=	$(FLUIDSYNTHLIB)
