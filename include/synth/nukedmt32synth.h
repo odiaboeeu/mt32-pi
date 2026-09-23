@@ -1,0 +1,72 @@
+//
+// nukedmt32synth.h
+//
+
+#ifndef _nukedmt32synth_h
+#define _nukedmt32synth_h
+
+#include <circle/types.h>
+
+#include "rommanager.h"
+#include "synth/mt32romset.h"
+#include "synth/synthbase.h"
+
+class mt32_t;
+class Mt32Reverb;
+
+class CNukedMT32Synth : public CSynthBase
+{
+public:
+    explicit CNukedMT32Synth(unsigned int nSampleRate);
+    virtual ~CNukedMT32Synth();
+
+    virtual bool Initialize() override;
+    virtual void HandleMIDIShortMessage(u32 nMessage) override;
+    virtual void HandleMIDISysExMessage(
+        const u8* pData,
+        size_t nSize
+    ) override;
+    virtual bool IsActive() override;
+    virtual void AllSoundOff() override;
+    virtual void SetMasterVolume(u8 nVolume) override;
+    virtual size_t Render(s16* pOutBuffer, size_t nFrames) override;
+    virtual size_t Render(float* pOutBuffer, size_t nFrames) override;
+    virtual void ReportStatus() const override;
+    virtual void UpdateLCD(CLCD& LCD, unsigned int nTicks) override;
+
+    TMT32ROMSet GetROMSet() const
+    {
+        return m_CurrentROMSet;
+    }
+
+    CROMManager& GetROMManager()
+    {
+        return m_ROMManager;
+    }
+
+private:
+    static constexpr size_t OldControlROMSize = 0x10000;
+    static constexpr size_t NewControlROMSize = 0x20000;
+    static constexpr size_t PCMROMSize = 0x80000;
+    static constexpr size_t LCDTextLength = 20;
+
+    static unsigned int GetShortMessageLength(u8 nStatus);
+
+    void PostMIDIByte(u8 nByte);
+    void ClearSynth();
+
+    mt32_t* m_pMT32;
+    Mt32Reverb* m_pReverb;
+
+    CROMManager m_ROMManager;
+    TMT32ROMSet m_CurrentROMSet;
+    const MT32Emu::ROMImage* m_pControlROMImage;
+    const MT32Emu::ROMImage* m_pPCMROMImage;
+
+    u8 m_nMasterVolume;
+    bool m_bInitialized;
+
+    char m_LCDText[LCDTextLength + 1];
+};
+
+#endif

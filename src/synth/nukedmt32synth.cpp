@@ -1,0 +1,326 @@
+//
+// nukedmt32synth.cpp
+//
+
+#include <circle/logger.h>
+
+#include <cstring>
+
+#include "config.h"
+#include "mt32.h"
+#include "reverb.h"
+#include "synth/nukedmt32synth.h"
+
+LOGMODULE("nukedmt32synth");
+
+CNukedMT32Synth::CNukedMT32Synth(unsigned int nSampleRate)
+    : CSynthBase(nSampleRate),
+      m_pMT32(nullptr),
+      m_pReverb(nullptr),
+      m_CurrentROMSet(TMT32ROMSet::Any),
+      m_pControlROMImage(nullptr),
+      m_pPCMROMImage(nullptr),
+      m_nMasterVolume(100),
+      m_bInitialized(false),
+      m_LCDText{'\0'}
+{
+}
+
+CNukedMT32Synth::~CNukedMT32Synth()
+{
+    ClearSynth();
+}
+
+void CNukedMT32Synth::ClearSynth()
+{
+    delete m_pReverb;
+    m_pReverb = nullptr;
+
+    delete m_pMT32;
+    m_pMT32 = nullptr;
+
+    m_bInitialized = false;
+}
+
+bool CNukedMT32Synth::Initialize()
+{
+    if (!m_ROMManager.ScanROMs())
+    {
+        LOGERR("No MT-32 ROM set available");
+        return false;
+    }
+
+    TMT32ROMSet InitialROMSet = CConfig::Get()->MT32EmuROMSet;
+
+    if (InitialROMSet != TMT32ROMSet::MT32Old &&
+        InitialROMSet != TMT32ROMSet::MT32New)
+    {
+        InitialROMSet = TMT32ROMSet::Any;
+    }
+
+    if (!m_ROMManager.GetROMSet(
+            InitialROMSet,
+            m_CurrentROMSet,
+            m_pControlROMImage,
+            m_pPCMROMImage))
+    {
+        LOGERR("Failed to obtain MT-32 ROM set");
+        return false;
+    }
+
+    if (m_CurrentROMSet != TMT32ROMSet::MT32Old &&
+        m_CurrentROMSet != TMT32ROMSet::MT32New)
+    {
+        LOGERR("Nuked-MT32 currently supports MT-32 ROMs only");
+        return false;
+    }
+
+    MT32Emu::File* const pControlFile =
+        m_pControlROMImage->getFile();
+
+    MT32Emu::File* const pPCMFile =
+        m_pPCMROMImage->getFile();
+
+    const size_t nExpectedControlSize =
+        m_CurrentROMSet == TMT32ROMSet::MT32Old
+            ? OldControlROMSize
+            : NewControlROMSize;
+
+    const size_t nControlSize = pControlFile->getSize();
+    const size_t nPCMSize = pPCMFile->getSize();
+
+    if (nControlSize != nExpectedControlSize)
+    {
+        LOGERR(
+            "Unexpected Control ROM size: %u",
+            static_cast<unsigned int>(nControlSize)
+        );
+        return false;
+    }
+
+    if (nPCMSize != PCMROMSize)
+    {
+        LOGERR(
+            "Unexpected PCM ROM size: %u",
+            static_cast<unsigned int>(nPCMSize)
+        );
+        return false;
+    }
+
+    const MT32Emu::Bit8u* const pControlData =
+        pControlFile->getData();
+
+    const MT32Emu::Bit8u* const pPCMData =
+        pPCMFile->getData();
+
+    if (!pControlData || !pPCMData)
+    {
+        LOGERR("MT-32 ROM data is unavailable");
+        return false;
+    }
+
+    m_pMT32 = new mt32_t();
+
+    if (!m_pMT32)
+    {
+        LOGERR("Failed to allocate Nuked-MT32 instance");
+        return false;
+    }
+
+    std::memset(m_pMT32->rom, 0, sizeof(m_pMT32->rom));
+    std::memcpy(
+        m_pMT32->rom,
+        pControlData,
+        nControlSize
+    );
+
+    std::memcpy(
+        m_pMT32->pcm,
+        pPCMData,
+        nPCMSize
+    );
+
+    m_pMT32->old_machine =
+        m_CurrentROMSet == TMT32ROMSet::MT32Old;
+
+    m_pReverb = new Mt32Reverb();
+
+    if (!m_pReverb)
+    {
+        LOGERR("Failed to allocate Nuked-MT32 reverb");
+        ClearSynth();
+        return false;
+    }
+
+    m_pReverb->init();
+
+    const char* const pModel =
+        m_pMT32->old_machine ? "MT-32 old" : "MT-32 new";
+
+    std::strncpy(
+        m_LCDText,
+        pModel,
+        sizeof(m_LCDText) - 1
+    );
+    m_LCDText[sizeof(m_LCDText) - 1] = '\0';
+
+    m_bInitialized = true;
+
+    LOGNOTE(
+        "Nuked-MT32 initialized with %s ROM set",
+        pModel
+    );
+
+    return true;
+}
+
+unsigned int CNukedMT32Synth::GetShortMessageLength(u8 nStatus)
+{
+    if (nStatus >= 0xF8)
+        return 1;
+
+    if (nStatus >= 0xF0)
+    {
+        switch (nStatus)
+        {
+            case 0xF1:
+            case 0xF3:
+                return 2;
+
+            case 0xF2:
+                return 3;
+
+            default:
+                return 1;
+        }
+    }
+
+    const u8 nType = nStatus & 0xF0;
+
+    if (nType == 0xC0 || nType == 0xD0)
+        return 2;
+
+    return 3;
+}
+
+void CNukedMT32Synth::PostMIDIByte(u8 nByte)
+{
+    if (!m_bInitialized)
+        return;
+
+    m_pMT32->post_midi(nByte);
+    m_pReverb->observeMidiByte(nByte);
+}
+
+void CNukedMT32Synth::HandleMIDIShortMessage(u32 nMessage)
+{
+    if (!m_bInitialized)
+        return;
+
+    const u8 nStatus = static_cast<u8>(nMessage);
+    const unsigned int nLength =
+        GetShortMessageLength(nStatus);
+
+    for (unsigned int i = 0; i < nLength; ++i)
+        PostMIDIByte(static_cast<u8>(nMessage >> (i * 8)));
+
+    CSynthBase::HandleMIDIShortMessage(nMessage);
+}
+
+void CNukedMT32Synth::HandleMIDISysExMessage(
+    const u8* pData,
+    size_t nSize
+)
+{
+    if (!m_bInitialized || !pData)
+        return;
+
+    for (size_t i = 0; i < nSize; ++i)
+        PostMIDIByte(pData[i]);
+}
+
+bool CNukedMT32Synth::IsActive()
+{
+    return false;
+}
+
+void CNukedMT32Synth::AllSoundOff()
+{
+    if (m_bInitialized)
+    {
+        for (u8 nChannel = 0; nChannel < 16; ++nChannel)
+        {
+            PostMIDIByte(0xB0 | nChannel);
+            PostMIDIByte(120);
+            PostMIDIByte(0);
+        }
+    }
+
+    CSynthBase::AllSoundOff();
+}
+
+void CNukedMT32Synth::SetMasterVolume(u8 nVolume)
+{
+    m_nMasterVolume = nVolume;
+}
+
+size_t CNukedMT32Synth::Render(
+    s16* pOutBuffer,
+    size_t nFrames
+)
+{
+    if (pOutBuffer)
+    {
+        std::memset(
+            pOutBuffer,
+            0,
+            nFrames * 2 * sizeof(*pOutBuffer)
+        );
+    }
+
+    return nFrames;
+}
+
+size_t CNukedMT32Synth::Render(
+    float* pOutBuffer,
+    size_t nFrames
+)
+{
+    if (pOutBuffer)
+    {
+        std::memset(
+            pOutBuffer,
+            0,
+            nFrames * 2 * sizeof(*pOutBuffer)
+        );
+    }
+
+    return nFrames;
+}
+
+void CNukedMT32Synth::ReportStatus() const
+{
+    if (m_pUI)
+        m_pUI->ShowSystemMessage("Nuked-MT32 ready");
+}
+
+void CNukedMT32Synth::UpdateLCD(
+    CLCD& LCD,
+    unsigned int nTicks
+)
+{
+    (void)nTicks;
+
+    const u8 nStatusRow =
+        LCD.GetType() == CLCD::TType::Character
+            ? LCD.Height() - 1
+            : LCD.Height() / 16 - 1;
+
+    LCD.Print(
+        m_LCDText,
+        0,
+        nStatusRow,
+        true,
+        false
+    );
+}
