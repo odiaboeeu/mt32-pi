@@ -247,8 +247,12 @@ void CNukedMT32Synth::HandleMIDIShortMessage(u32 nMessage)
     const unsigned int nLength =
         GetShortMessageLength(nStatus);
 
+    m_Lock.Acquire();
+
     for (unsigned int i = 0; i < nLength; ++i)
         PostMIDIByte(static_cast<u8>(nMessage >> (i * 8)));
+
+    m_Lock.Release();
 
     CSynthBase::HandleMIDIShortMessage(nMessage);
 }
@@ -258,28 +262,36 @@ void CNukedMT32Synth::HandleMIDISysExMessage(
     size_t nSize
 )
 {
-    if (!m_bInitialized || !pData)
+    if (!m_bInitialized || !pData || nSize == 0)
         return;
+
+    m_Lock.Acquire();
 
     for (size_t i = 0; i < nSize; ++i)
         PostMIDIByte(pData[i]);
+
+    m_Lock.Release();
 }
 
 bool CNukedMT32Synth::IsActive()
 {
-    return false;
+    return m_bInitialized;
 }
 
 void CNukedMT32Synth::AllSoundOff()
 {
     if (m_bInitialized)
     {
+        m_Lock.Acquire();
+
         for (u8 nChannel = 0; nChannel < 16; ++nChannel)
         {
             PostMIDIByte(0xB0 | nChannel);
             PostMIDIByte(120);
             PostMIDIByte(0);
         }
+
+        m_Lock.Release();
     }
 
     CSynthBase::AllSoundOff();
@@ -287,7 +299,12 @@ void CNukedMT32Synth::AllSoundOff()
 
 void CNukedMT32Synth::SetMasterVolume(u8 nVolume)
 {
+    if (nVolume > 100)
+        nVolume = 100;
+
+    m_Lock.Acquire();
     m_nMasterVolume = nVolume;
+    m_Lock.Release();
 }
 
 void CNukedMT32Synth::getOutputSamples(
@@ -309,6 +326,9 @@ void CNukedMT32Synth::getOutputSamples(
         return;
     }
 
+    const float nGain =
+        static_cast<float>(m_nMasterVolume) / 100.0f;
+
     unsigned int nRendered = 0;
 
     while (nRendered < nFrames)
@@ -328,14 +348,18 @@ void CNukedMT32Synth::getOutputSamples(
         for (unsigned int i = 0; i < nChunk; ++i)
         {
             pOutBuffer[(nRendered + i) * 2] =
-                static_cast<float>(
-                    m_pMT32->samples[i][0]
-                ) / 32768.0f;
+                (
+                    static_cast<float>(
+                        m_pMT32->samples[i][0]
+                    ) / 32768.0f
+                ) * nGain;
 
             pOutBuffer[(nRendered + i) * 2 + 1] =
-                static_cast<float>(
-                    m_pMT32->samples[i][1]
-                ) / 32768.0f;
+                (
+                    static_cast<float>(
+                        m_pMT32->samples[i][1]
+                    ) / 32768.0f
+                ) * nGain;
         }
 
         nRendered += nChunk;
