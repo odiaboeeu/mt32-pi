@@ -302,8 +302,44 @@ void CNukedMT32Synth::SetMasterVolume(u8 nVolume)
     if (nVolume > 100)
         nVolume = 100;
 
+    const u8 nAddressHigh = 0x10;
+    const u8 nAddressMid = 0x00;
+    const u8 nAddressLow = 0x16;
+
+    const u8 nChecksum = static_cast<u8>(
+        -(
+            nAddressHigh +
+            nAddressMid +
+            nAddressLow +
+            nVolume
+        )
+    ) & 0x7F;
+
+    const u8 Message[] =
+    {
+        0xF0,
+        0x41,
+        0x10,
+        0x16,
+        0x12,
+        nAddressHigh,
+        nAddressMid,
+        nAddressLow,
+        nVolume,
+        nChecksum,
+        0xF7
+    };
+
     m_Lock.Acquire();
+
     m_nMasterVolume = nVolume;
+
+    if (m_bInitialized)
+    {
+        for (size_t i = 0; i < sizeof(Message); ++i)
+            PostMIDIByte(Message[i]);
+    }
+
     m_Lock.Release();
 }
 
@@ -326,9 +362,6 @@ void CNukedMT32Synth::getOutputSamples(
         return;
     }
 
-    const float nGain =
-        static_cast<float>(m_nMasterVolume) / 100.0f;
-
     unsigned int nRendered = 0;
 
     while (nRendered < nFrames)
@@ -348,18 +381,14 @@ void CNukedMT32Synth::getOutputSamples(
         for (unsigned int i = 0; i < nChunk; ++i)
         {
             pOutBuffer[(nRendered + i) * 2] =
-                (
-                    static_cast<float>(
-                        m_pMT32->samples[i][0]
-                    ) / 32768.0f
-                ) * nGain;
+                static_cast<float>(
+                    m_pMT32->samples[i][0]
+                ) / 32768.0f;
 
             pOutBuffer[(nRendered + i) * 2 + 1] =
-                (
-                    static_cast<float>(
-                        m_pMT32->samples[i][1]
-                    ) / 32768.0f
-                ) * nGain;
+                static_cast<float>(
+                    m_pMT32->samples[i][1]
+                ) / 32768.0f;
         }
 
         nRendered += nChunk;
