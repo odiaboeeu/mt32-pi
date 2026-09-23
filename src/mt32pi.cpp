@@ -1187,28 +1187,38 @@ void CMT32Pi::ProcessButtonEvent(const TButtonEvent& Event)
 	if (Event.Button == TButton::Button1 && !Event.bRepeat)
 	{
 		// Cycle through all available synthesizers.
-		TSynth Candidates[3];
+		TSynth Candidates[4];
 
 		if (m_pCurrentSynth == m_pMT32Synth)
 		{
 			Candidates[0] = TSynth::SoundFont;
 			Candidates[1] = TSynth::SC55;
-			Candidates[2] = TSynth::MT32;
+			Candidates[2] = TSynth::NukedMT32;
+			Candidates[3] = TSynth::MT32;
 		}
 		else if (m_pCurrentSynth == m_pSoundFontSynth)
 		{
 			Candidates[0] = TSynth::SC55;
+			Candidates[1] = TSynth::NukedMT32;
+			Candidates[2] = TSynth::MT32;
+			Candidates[3] = TSynth::SoundFont;
+		}
+		else if (m_pCurrentSynth == m_pSC55Synth)
+		{
+			Candidates[0] = TSynth::NukedMT32;
 			Candidates[1] = TSynth::MT32;
 			Candidates[2] = TSynth::SoundFont;
+			Candidates[3] = TSynth::SC55;
 		}
 		else
 		{
 			Candidates[0] = TSynth::MT32;
 			Candidates[1] = TSynth::SoundFont;
 			Candidates[2] = TSynth::SC55;
+			Candidates[3] = TSynth::NukedMT32;
 		}
 
-		for (unsigned i = 0; i < 3; ++i)
+		for (unsigned int i = 0; i < 4; ++i)
 		{
 			CSynthBase* pCandidate = nullptr;
 
@@ -1218,6 +1228,8 @@ void CMT32Pi::ProcessButtonEvent(const TButtonEvent& Event)
 				pCandidate = m_pSoundFontSynth;
 			else if (Candidates[i] == TSynth::SC55)
 				pCandidate = m_pSC55Synth;
+			else if (Candidates[i] == TSynth::NukedMT32)
+				pCandidate = m_pNukedMT32Synth;
 
 			if (pCandidate && pCandidate != m_pCurrentSynth)
 			{
