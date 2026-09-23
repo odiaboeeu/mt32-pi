@@ -93,6 +93,7 @@ INCLUDE		+=	-I $(MT32EMUBUILDDIR)/include
 EXTRALIBS	+=	$(MT32EMULIB)
 
 # Experimental Nuked-MT32 bare-metal core
+DEFINE		+=	-DNUKED_MT32_BAREMETAL
 INCLUDE		+=	-I $(NUKEDMT32HOME) \
 			-I $(NUKEDMT32HOME)/munt
 EXTRALIBS	+=	--whole-archive $(NUKEDMT32LIB) --no-whole-archive
