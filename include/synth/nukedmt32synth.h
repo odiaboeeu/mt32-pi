@@ -7,6 +7,7 @@
 
 #include <circle/types.h>
 
+#include "FloatSampleProvider.h"
 #include "rommanager.h"
 #include "synth/mt32romset.h"
 #include "synth/synthbase.h"
@@ -14,7 +15,9 @@
 class mt32_t;
 class Mt32Reverb;
 
-class CNukedMT32Synth : public CSynthBase
+class CNukedMT32Synth
+    : public CSynthBase,
+      private SRCTools::FloatSampleProvider
 {
 public:
     explicit CNukedMT32Synth(unsigned int nSampleRate);
@@ -47,6 +50,7 @@ public:
 private:
     static constexpr unsigned int NativeSampleRate = 32000;
     static constexpr size_t NativeBufferFrames = 8192;
+    static constexpr size_t ConversionBufferFrames = 256;
     static constexpr size_t OldControlROMSize = 0x10000;
     static constexpr size_t NewControlROMSize = 0x20000;
     static constexpr size_t PCMROMSize = 0x80000;
@@ -55,11 +59,17 @@ private:
     static unsigned int GetShortMessageLength(u8 nStatus);
 
     void PostMIDIByte(u8 nByte);
-    size_t RenderNative(s16* pOutBuffer, size_t nFrames);
+
+    virtual void getOutputSamples(
+        float* pOutBuffer,
+        unsigned int nFrames
+    ) override;
+
     void ClearSynth();
 
     mt32_t* m_pMT32;
     Mt32Reverb* m_pReverb;
+    SRCTools::FloatSampleProvider* m_pResamplerModel;
 
     CROMManager m_ROMManager;
     TMT32ROMSet m_CurrentROMSet;

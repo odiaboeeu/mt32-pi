@@ -90,7 +90,8 @@ endif
 
 -include $(DEPS)
 
-INCLUDE		+=	-I $(MT32EMUBUILDDIR)/include
+INCLUDE		+=	-I $(MT32EMUBUILDDIR)/include \
+			-I $(MT32EMUHOME)/src/srchelper/srctools/include
 EXTRALIBS	+=	$(MT32EMULIB)
 
 # Experimental Nuked-MT32 bare-metal core

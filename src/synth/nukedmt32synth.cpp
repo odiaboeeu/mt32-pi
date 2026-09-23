@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "mt32.h"
+#include "ResamplerModel.h"
 #include "reverb.h"
 #include "synth/nukedmt32synth.h"
 
@@ -17,6 +18,7 @@ CNukedMT32Synth::CNukedMT32Synth(unsigned int nSampleRate)
     : CSynthBase(nSampleRate),
       m_pMT32(nullptr),
       m_pReverb(nullptr),
+      m_pResamplerModel(nullptr),
       m_CurrentROMSet(TMT32ROMSet::Any),
       m_pControlROMImage(nullptr),
       m_pPCMROMImage(nullptr),
@@ -33,6 +35,16 @@ CNukedMT32Synth::~CNukedMT32Synth()
 
 void CNukedMT32Synth::ClearSynth()
 {
+    if (m_pResamplerModel)
+    {
+        SRCTools::ResamplerModel::freeResamplerModel(
+            *m_pResamplerModel,
+            *this
+        );
+
+        m_pResamplerModel = nullptr;
+    }
+
     delete m_pReverb;
     m_pReverb = nullptr;
 
@@ -164,16 +176,21 @@ bool CNukedMT32Synth::Initialize()
     );
     m_LCDText[sizeof(m_LCDText) - 1] = '\0';
 
-    if (m_nSampleRate != NativeSampleRate)
-    {
-        LOGWARN(
-            "Native audio requires %u Hz; configured output is %u Hz",
-            NativeSampleRate,
-            m_nSampleRate
-        );
-    }
-
     m_bInitialized = true;
+
+    m_pResamplerModel =
+        &SRCTools::ResamplerModel::createResamplerModel(
+            *this,
+            static_cast<double>(NativeSampleRate),
+            static_cast<double>(m_nSampleRate),
+            SRCTools::ResamplerModel::GOOD
+        );
+
+    LOGNOTE(
+        "Nuked-MT32 audio path: %u Hz to %u Hz",
+        NativeSampleRate,
+        m_nSampleRate
+    );
 
     LOGNOTE(
         "Nuked-MT32 initialized with %s ROM set",
@@ -273,19 +290,30 @@ void CNukedMT32Synth::SetMasterVolume(u8 nVolume)
     m_nMasterVolume = nVolume;
 }
 
-size_t CNukedMT32Synth::RenderNative(
-    s16* pOutBuffer,
-    size_t nFrames
+void CNukedMT32Synth::getOutputSamples(
+    float* pOutBuffer,
+    unsigned int nFrames
 )
 {
-    if (!pOutBuffer || !m_bInitialized)
-        return 0;
+    if (!pOutBuffer)
+        return;
 
-    size_t nRendered = 0;
+    if (!m_bInitialized)
+    {
+        std::memset(
+            pOutBuffer,
+            0,
+            static_cast<size_t>(nFrames) * 2 * sizeof(*pOutBuffer)
+        );
+
+        return;
+    }
+
+    unsigned int nRendered = 0;
 
     while (nRendered < nFrames)
     {
-        size_t nChunk = nFrames - nRendered;
+        unsigned int nChunk = nFrames - nRendered;
 
         if (nChunk > NativeBufferFrames)
             nChunk = NativeBufferFrames;
@@ -297,16 +325,21 @@ size_t CNukedMT32Synth::RenderNative(
             static_cast<int>(nChunk)
         );
 
-        std::memcpy(
-            pOutBuffer + nRendered * 2,
-            &m_pMT32->samples[0][0],
-            nChunk * 2 * sizeof(*pOutBuffer)
-        );
+        for (unsigned int i = 0; i < nChunk; ++i)
+        {
+            pOutBuffer[(nRendered + i) * 2] =
+                static_cast<float>(
+                    m_pMT32->samples[i][0]
+                ) / 32768.0f;
+
+            pOutBuffer[(nRendered + i) * 2 + 1] =
+                static_cast<float>(
+                    m_pMT32->samples[i][1]
+                ) / 32768.0f;
+        }
 
         nRendered += nChunk;
     }
-
-    return nRendered;
 }
 
 size_t CNukedMT32Synth::Render(
@@ -319,24 +352,52 @@ size_t CNukedMT32Synth::Render(
 
     m_Lock.Acquire();
 
-    if (m_nSampleRate == NativeSampleRate)
-    {
-        if (RenderNative(pOutBuffer, nFrames) != nFrames)
-        {
-            std::memset(
-                pOutBuffer,
-                0,
-                nFrames * 2 * sizeof(*pOutBuffer)
-            );
-        }
-    }
-    else
+    if (!m_bInitialized || !m_pResamplerModel)
     {
         std::memset(
             pOutBuffer,
             0,
             nFrames * 2 * sizeof(*pOutBuffer)
         );
+
+        m_Lock.Release();
+        return nFrames;
+    }
+
+    float ConversionBuffer[ConversionBufferFrames * 2];
+    size_t nRendered = 0;
+
+    while (nRendered < nFrames)
+    {
+        size_t nChunk = nFrames - nRendered;
+
+        if (nChunk > ConversionBufferFrames)
+            nChunk = ConversionBufferFrames;
+
+        m_pResamplerModel->getOutputSamples(
+            ConversionBuffer,
+            static_cast<unsigned int>(nChunk)
+        );
+
+        for (size_t i = 0; i < nChunk * 2; ++i)
+        {
+            float nSample = ConversionBuffer[i];
+
+            if (nSample > 1.0f)
+                nSample = 1.0f;
+            else if (nSample < -1.0f)
+                nSample = -1.0f;
+
+            const float nScaled =
+                nSample >= 0.0f
+                    ? nSample * 32767.0f
+                    : nSample * 32768.0f;
+
+            pOutBuffer[nRendered * 2 + i] =
+                static_cast<s16>(nScaled);
+        }
+
+        nRendered += nChunk;
     }
 
     m_Lock.Release();
@@ -354,49 +415,20 @@ size_t CNukedMT32Synth::Render(
 
     m_Lock.Acquire();
 
-    if (!m_bInitialized ||
-        m_nSampleRate != NativeSampleRate)
+    if (!m_bInitialized || !m_pResamplerModel)
     {
         std::memset(
             pOutBuffer,
             0,
             nFrames * 2 * sizeof(*pOutBuffer)
         );
-
-        m_Lock.Release();
-        return nFrames;
     }
-
-    size_t nRendered = 0;
-
-    while (nRendered < nFrames)
+    else
     {
-        size_t nChunk = nFrames - nRendered;
-
-        if (nChunk > NativeBufferFrames)
-            nChunk = NativeBufferFrames;
-
-        m_pMT32->clock(nChunk);
-
-        m_pReverb->process(
-            &m_pMT32->samples[0][0],
-            static_cast<int>(nChunk)
+        m_pResamplerModel->getOutputSamples(
+            pOutBuffer,
+            static_cast<unsigned int>(nFrames)
         );
-
-        for (size_t i = 0; i < nChunk; ++i)
-        {
-            pOutBuffer[(nRendered + i) * 2] =
-                static_cast<float>(
-                    m_pMT32->samples[i][0]
-                ) / 32768.0f;
-
-            pOutBuffer[(nRendered + i) * 2 + 1] =
-                static_cast<float>(
-                    m_pMT32->samples[i][1]
-                ) / 32768.0f;
-        }
-
-        nRendered += nChunk;
     }
 
     m_Lock.Release();
