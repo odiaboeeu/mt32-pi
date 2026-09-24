@@ -24,6 +24,17 @@ CNukedMT32Synth::CNukedMT32Synth(unsigned int nSampleRate)
       m_pPCMROMImage(nullptr),
       m_nMasterVolume(100),
       m_bInitialized(false),
+      m_MIDIChannelPartMap{
+          0x01,
+          0x02,
+          0x03,
+          0x04,
+          0x05,
+          0x06,
+          0x07,
+          0x08,
+          0x09
+      },
       m_LCDText{'\0'}
 {
 }
@@ -297,6 +308,68 @@ void CNukedMT32Synth::AllSoundOff()
     CSynthBase::AllSoundOff();
 }
 
+void CNukedMT32Synth::SetMIDIChannels(bool bAlternate)
+{
+    const u8 nAddressHigh = 0x10;
+    const u8 nAddressMid = 0x00;
+    const u8 nAddressLow = 0x0D;
+
+    const u8 ChannelMap[MT32PartCount] =
+    {
+        static_cast<u8>(bAlternate ? 0x00 : 0x01),
+        static_cast<u8>(bAlternate ? 0x01 : 0x02),
+        static_cast<u8>(bAlternate ? 0x02 : 0x03),
+        static_cast<u8>(bAlternate ? 0x03 : 0x04),
+        static_cast<u8>(bAlternate ? 0x04 : 0x05),
+        static_cast<u8>(bAlternate ? 0x05 : 0x06),
+        static_cast<u8>(bAlternate ? 0x06 : 0x07),
+        static_cast<u8>(bAlternate ? 0x07 : 0x08),
+        0x09
+    };
+
+    unsigned int nChecksumSum =
+        nAddressHigh +
+        nAddressMid +
+        nAddressLow;
+
+    for (size_t i = 0; i < MT32PartCount; ++i)
+        nChecksumSum += ChannelMap[i];
+
+    const u8 nChecksum =
+        static_cast<u8>(-nChecksumSum) & 0x7F;
+
+    const u8 Header[] =
+    {
+        0xF0,
+        0x41,
+        0x10,
+        0x16,
+        0x12,
+        nAddressHigh,
+        nAddressMid,
+        nAddressLow
+    };
+
+    m_Lock.Acquire();
+
+    for (size_t i = 0; i < MT32PartCount; ++i)
+        m_MIDIChannelPartMap[i] = ChannelMap[i];
+
+    if (m_bInitialized)
+    {
+        for (size_t i = 0; i < sizeof(Header); ++i)
+            PostMIDIByte(Header[i]);
+
+        for (size_t i = 0; i < MT32PartCount; ++i)
+            PostMIDIByte(ChannelMap[i]);
+
+        PostMIDIByte(nChecksum);
+        PostMIDIByte(0xF7);
+    }
+
+    m_Lock.Release();
+}
+
 void CNukedMT32Synth::SetMasterVolume(u8 nVolume)
 {
     if (nVolume > 100)
@@ -515,21 +588,25 @@ void CNukedMT32Synth::UpdateLCD(
     float ChannelLevels[16];
     float ChannelPeaks[16];
 
-    constexpr u16 PercussionMask = 1 << 9;
+    const u16 nPercussionMask =
+        static_cast<u16>(
+            1 << m_MIDIChannelPartMap[MT32PartCount - 1]
+        );
 
     m_MIDIMonitor.GetChannelLevels(
         nTicks,
         ChannelLevels,
         ChannelPeaks,
-        PercussionMask
+        nPercussionMask
     );
 
-    float PartLevels[9];
-    float PartPeaks[9];
+    float PartLevels[MT32PartCount];
+    float PartPeaks[MT32PartCount];
 
-    for (u8 nPart = 0; nPart < 9; ++nPart)
+    for (u8 nPart = 0; nPart < MT32PartCount; ++nPart)
     {
-        const u8 nChannel = nPart + 1;
+        const u8 nChannel =
+            m_MIDIChannelPartMap[nPart];
 
         PartLevels[nPart] = ChannelLevels[nChannel];
         PartPeaks[nPart] = ChannelPeaks[nChannel];
@@ -540,7 +617,7 @@ void CNukedMT32Synth::UpdateLCD(
         nBarHeight,
         PartLevels,
         PartPeaks,
-        9,
+        MT32PartCount,
         false
     );
 

@@ -438,6 +438,11 @@ bool CMT32Pi::InitNukedMT32Synth()
 		return false;
 	}
 
+	m_pNukedMT32Synth->SetMIDIChannels(
+		m_pConfig->MT32EmuMIDIChannels ==
+			CMT32Synth::TMIDIChannels::Alternate
+	);
+
 	m_pNukedMT32Synth->SetUserInterface(&m_UserInterface);
 
 	LOGNOTE("Nuked-MT32 initialized and available");

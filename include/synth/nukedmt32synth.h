@@ -37,6 +37,8 @@ public:
     virtual void ReportStatus() const override;
     virtual void UpdateLCD(CLCD& LCD, unsigned int nTicks) override;
 
+    void SetMIDIChannels(bool bAlternate);
+
     TMT32ROMSet GetROMSet() const
     {
         return m_CurrentROMSet;
@@ -55,6 +57,7 @@ private:
     static constexpr size_t NewControlROMSize = 0x20000;
     static constexpr size_t PCMROMSize = 0x80000;
     static constexpr size_t LCDTextLength = 20;
+    static constexpr size_t MT32PartCount = 9;
 
     static unsigned int GetShortMessageLength(u8 nStatus);
 
@@ -79,6 +82,7 @@ private:
     u8 m_nMasterVolume;
     bool m_bInitialized;
 
+    u8 m_MIDIChannelPartMap[MT32PartCount];
     char m_LCDText[LCDTextLength + 1];
 };
 
