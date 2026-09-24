@@ -500,7 +500,49 @@ void CNukedMT32Synth::UpdateLCD(
     unsigned int nTicks
 )
 {
-    (void)nTicks;
+    const u8 nHeight = LCD.Height();
+
+    const u8 nStatusRow =
+        LCD.GetType() == CLCD::TType::Character
+            ? nHeight - 1
+            : nHeight / 16 - 1;
+
+    const u8 nBarHeight =
+        LCD.GetType() == CLCD::TType::Character
+            ? nHeight - 1
+            : nHeight - 16;
+
+    float ChannelLevels[16];
+    float ChannelPeaks[16];
+
+    constexpr u16 PercussionMask = 1 << 9;
+
+    m_MIDIMonitor.GetChannelLevels(
+        nTicks,
+        ChannelLevels,
+        ChannelPeaks,
+        PercussionMask
+    );
+
+    float PartLevels[9];
+    float PartPeaks[9];
+
+    for (u8 nPart = 0; nPart < 9; ++nPart)
+    {
+        const u8 nChannel = nPart + 1;
+
+        PartLevels[nPart] = ChannelLevels[nChannel];
+        PartPeaks[nPart] = ChannelPeaks[nChannel];
+    }
+
+    CUserInterface::DrawChannelLevels(
+        LCD,
+        nBarHeight,
+        PartLevels,
+        PartPeaks,
+        9,
+        false
+    );
 
     if (m_bInitialized && m_pMT32->lcd_is_on())
     {
@@ -510,20 +552,26 @@ void CNukedMT32Synth::UpdateLCD(
         {
             const u8 nCharacter = pText[i];
 
-            m_LCDText[i] =
+            if (nCharacter == 0x01)
+            {
+                m_LCDText[i] = '\xFF';
+            }
+            else if (
                 nCharacter >= 0x20 &&
                 nCharacter < 0x7F
-                    ? static_cast<char>(nCharacter)
-                    : ' ';
+            )
+            {
+                m_LCDText[i] =
+                    static_cast<char>(nCharacter);
+            }
+            else
+            {
+                m_LCDText[i] = ' ';
+            }
         }
 
         m_LCDText[LCDTextLength] = '\0';
     }
-
-    const u8 nStatusRow =
-        LCD.GetType() == CLCD::TType::Character
-            ? LCD.Height() - 1
-            : LCD.Height() / 16 - 1;
 
     LCD.Print(
         m_LCDText,
