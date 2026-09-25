@@ -78,6 +78,12 @@ CFG(rom_set,			TMT32EmuROMSet,			MT32EmuROMSet,				TMT32EmuROMSet::MT32Old				)
 CFG(reversed_stereo,		bool,				MT32EmuReversedStereo,			false						)
 END_SECTION
 
+BEGIN_SECTION(nuked_mt32)
+CFG(midi_channels,        TMT32EmuMIDIChannels,       NukedMT32MIDIChannels,       TMT32EmuMIDIChannels::Standard          )
+CFG(rom_set,              TNukedMT32ROMVersion,       NukedMT32ROMVersion,         TNukedMT32ROMVersion::V1_04              )
+CFG(reversed_stereo,      bool,                       NukedMT32ReversedStereo,      false                                    )
+END_SECTION
+
 BEGIN_SECTION(fluidsynth)
 CFG(soundfont,			int,				FluidSynthSoundFont,			0						)
 CFG(polyphony,			int,				FluidSynthPolyphony,			200						)

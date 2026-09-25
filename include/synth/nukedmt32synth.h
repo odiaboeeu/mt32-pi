@@ -10,6 +10,7 @@
 #include "FloatSampleProvider.h"
 #include "rommanager.h"
 #include "synth/mt32romset.h"
+#include "synth/nukedmt32romversion.h"
 #include "synth/synthbase.h"
 
 class mt32_t;
@@ -38,6 +39,10 @@ public:
     virtual void UpdateLCD(CLCD& LCD, unsigned int nTicks) override;
 
     void SetMIDIChannels(bool bAlternate);
+    void SetReversedStereo(bool bEnabled)
+    {
+        m_bReversedStereo = bEnabled;
+    }
 
     TMT32ROMSet GetROMSet() const
     {
@@ -81,6 +86,7 @@ private:
 
     u8 m_nMasterVolume;
     bool m_bInitialized;
+    bool m_bReversedStereo;
 
     u8 m_MIDIChannelPartMap[MT32PartCount];
     char m_LCDText[LCDTextLength + 1];

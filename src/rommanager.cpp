@@ -83,6 +83,8 @@ CROMManager::CROMManager()
 	  m_pMT32NewControl(nullptr),
 	  m_pCM32LControl(nullptr),
 
+	  m_pNukedMT32Control{nullptr},
+
 	  m_pMT32PCM(nullptr),
 	  m_pCM32LPCM(nullptr)
 {
@@ -90,15 +92,46 @@ CROMManager::CROMManager()
 
 CROMManager::~CROMManager()
 {
-	const MT32Emu::ROMImage** const ROMs[] = { &m_pMT32OldControl, &m_pMT32NewControl, &m_pCM32LControl, &m_pMT32PCM, &m_pCM32LPCM };
-	for (const MT32Emu::ROMImage** pROMImagePtr : ROMs)
+	for (
+		size_t i = 0;
+		i < NukedMT32ROMVersionCount;
+		++i
+	)
 	{
-		if (*pROMImagePtr)
+		const MT32Emu::ROMImage* const pROM =
+			m_pNukedMT32Control[i];
+
+		if (
+			pROM &&
+			pROM != m_pMT32OldControl &&
+			pROM != m_pMT32NewControl
+		)
 		{
-			if (MT32Emu::File* File = (*pROMImagePtr)->getFile())
-				delete File;
-			MT32Emu::ROMImage::freeROMImage(*pROMImagePtr);
+			if (MT32Emu::File* const pFile = pROM->getFile())
+				delete pFile;
+
+			MT32Emu::ROMImage::freeROMImage(pROM);
 		}
+	}
+
+	const MT32Emu::ROMImage** const ROMs[] =
+	{
+		&m_pMT32OldControl,
+		&m_pMT32NewControl,
+		&m_pCM32LControl,
+		&m_pMT32PCM,
+		&m_pCM32LPCM
+	};
+
+	for (const MT32Emu::ROMImage** pROMPtr : ROMs)
+	{
+		if (!*pROMPtr)
+			continue;
+
+		if (MT32Emu::File* const pFile = (*pROMPtr)->getFile())
+			delete pFile;
+
+		MT32Emu::ROMImage::freeROMImage(*pROMPtr);
 	}
 }
 
@@ -108,10 +141,6 @@ bool CROMManager::ScanROMs()
 	FILINFO FileInfo;
 	FRESULT Result;
 	CString DirectoryPath;
-
-	// Already have all ROMs
-	if (HaveROMSet(TMT32ROMSet::All))
-		return true;
 
 	// Loop over each disk
 	for (auto pDisk : Disks)
@@ -133,9 +162,6 @@ bool CROMManager::ScanROMs()
 				// Try to open file
 				CheckROM(ROMPath);
 
-				// Stop if we have all ROMs
-				if (HaveROMSet(TMT32ROMSet::All))
-					return true;
 			}
 
 			Result = f_findnext(&Dir, &FileInfo);
@@ -224,6 +250,35 @@ bool CROMManager::GetROMSet(TMT32ROMSet ROMSet, TMT32ROMSet& pOutROMSet, const M
 	return true;
 }
 
+bool CROMManager::GetNukedMT32ROMSet(
+	TNukedMT32ROMVersion Version,
+	const MT32Emu::ROMImage*& pOutControl,
+	const MT32Emu::ROMImage*& pOutPCM
+) const
+{
+	const size_t nIndex =
+		static_cast<size_t>(Version);
+
+	if (nIndex >= NukedMT32ROMVersionCount)
+		return false;
+
+	if (
+		!m_pNukedMT32Control[nIndex] ||
+		!m_pMT32PCM
+	)
+	{
+		return false;
+	}
+
+	pOutControl =
+		m_pNukedMT32Control[nIndex];
+
+	pOutPCM =
+		m_pMT32PCM;
+
+	return true;
+}
+
 bool CROMManager::CheckROM(const char* pPath)
 {
 	CROMFile* pFile = new CROMFile();
@@ -246,44 +301,114 @@ bool CROMManager::CheckROM(const char* pPath)
 	return true;
 }
 
-bool CROMManager::StoreROM(const MT32Emu::ROMImage& ROMImage)
+bool CROMManager::StoreROM(
+	const MT32Emu::ROMImage& ROMImage
+)
 {
-	const MT32Emu::ROMInfo* pROMInfo = ROMImage.getROMInfo();
-	const MT32Emu::ROMImage** pROMImagePtr = nullptr;
+	const MT32Emu::ROMInfo* const pROMInfo =
+		ROMImage.getROMInfo();
 
-	// Not a valid ROM file
 	if (!pROMInfo)
 		return false;
 
-	if (pROMInfo->type == MT32Emu::ROMInfo::Type::Control)
+	if (
+		pROMInfo->type ==
+		MT32Emu::ROMInfo::Type::Control
+	)
 	{
-		// Is an 'old' MT-32 control ROM
-		if (pROMInfo->shortName[10] == '1' || pROMInfo->shortName[10] == 'b')
-			pROMImagePtr = &m_pMT32OldControl;
+		struct TExactROM
+		{
+			const char* pShortName;
+			size_t nIndex;
+		};
 
-		// Is a 'new' MT-32 control ROM
-		else if (pROMInfo->shortName[10] == '2')
-			pROMImagePtr = &m_pMT32NewControl;
+		static const TExactROM ExactROMs[] =
+		{
+			{"ctrl_mt32_1_04", 0},
+			{"ctrl_mt32_1_05", 1},
+			{"ctrl_mt32_1_06", 2},
+			{"ctrl_mt32_1_07", 3},
+			{"ctrl_mt32_2_04", 4},
+			{"ctrl_mt32_2_06", 5},
+			{"ctrl_mt32_2_07", 6}
+		};
 
-		// Is a CM-32L control ROM
+		bool bStoredExact = false;
+
+		for (const auto& ExactROM : ExactROMs)
+		{
+			if (
+				strcmp(
+					pROMInfo->shortName,
+					ExactROM.pShortName
+				) != 0
+			)
+			{
+				continue;
+			}
+
+			if (
+				m_pNukedMT32Control[
+					ExactROM.nIndex
+				]
+			)
+			{
+				return false;
+			}
+
+			m_pNukedMT32Control[
+				ExactROM.nIndex
+			] = &ROMImage;
+
+			bStoredExact = true;
+			break;
+		}
+
+		const MT32Emu::ROMImage** pFamily = nullptr;
+
+		if (
+			pROMInfo->shortName[10] == '1' ||
+			pROMInfo->shortName[10] == 'b'
+		)
+		{
+			pFamily = &m_pMT32OldControl;
+		}
+		else if (
+			pROMInfo->shortName[10] == '2'
+		)
+		{
+			pFamily = &m_pMT32NewControl;
+		}
 		else
-			pROMImagePtr = &m_pCM32LControl;
+		{
+			pFamily = &m_pCM32LControl;
+		}
+
+		if (!*pFamily)
+		{
+			*pFamily = &ROMImage;
+			return true;
+		}
+
+		return bStoredExact;
 	}
-	else if (pROMInfo->type == MT32Emu::ROMInfo::Type::PCM)
+
+	if (
+		pROMInfo->type ==
+		MT32Emu::ROMInfo::Type::PCM
+	)
 	{
-		// Is an MT-32 PCM ROM
-		if (pROMInfo->shortName[4] == 'm')
-			pROMImagePtr = &m_pMT32PCM;
+		const MT32Emu::ROMImage** pPCM =
+			pROMInfo->shortName[4] == 'm'
+				? &m_pMT32PCM
+				: &m_pCM32LPCM;
 
-		// Is a CM-32L PCM ROM
-		else
-			pROMImagePtr = &m_pCM32LPCM;
+		if (*pPCM)
+			return false;
+
+		*pPCM = &ROMImage;
+		return true;
 	}
 
-	// Ensure we don't already have this ROM
-	if (!pROMImagePtr || *pROMImagePtr)
-		return false;
-
-	*pROMImagePtr = &ROMImage;
-	return true;
+	return false;
 }

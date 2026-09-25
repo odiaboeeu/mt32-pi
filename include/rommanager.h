@@ -26,6 +26,7 @@
 #include <mt32emu/mt32emu.h>
 
 #include "synth/mt32romset.h"
+#include "synth/nukedmt32romversion.h"
 
 class CROMManager
 {
@@ -36,6 +37,11 @@ public:
 	bool ScanROMs();
 	bool HaveROMSet(TMT32ROMSet ROMSet) const;
 	bool GetROMSet(TMT32ROMSet ROMSet, TMT32ROMSet& pOutROMSet, const MT32Emu::ROMImage*& pOutControl, const MT32Emu::ROMImage*& pOutPCM) const;
+	bool GetNukedMT32ROMSet(
+		TNukedMT32ROMVersion Version,
+		const MT32Emu::ROMImage*& pOutControl,
+		const MT32Emu::ROMImage*& pOutPCM
+	) const;
 
 private:
 	bool CheckROM(const char* pPath);
@@ -45,6 +51,12 @@ private:
 	const MT32Emu::ROMImage* m_pMT32OldControl;
 	const MT32Emu::ROMImage* m_pMT32NewControl;
 	const MT32Emu::ROMImage* m_pCM32LControl;
+
+	static constexpr size_t NukedMT32ROMVersionCount = 7;
+
+	// Exact Control ROM versions used by Nuked-MT32
+	const MT32Emu::ROMImage*
+		m_pNukedMT32Control[NukedMT32ROMVersionCount];
 
 	// PCM ROMs
 	const MT32Emu::ROMImage* m_pMT32PCM;

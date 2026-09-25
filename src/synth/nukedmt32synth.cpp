@@ -24,6 +24,7 @@ CNukedMT32Synth::CNukedMT32Synth(unsigned int nSampleRate)
       m_pPCMROMImage(nullptr),
       m_nMasterVolume(100),
       m_bInitialized(false),
+      m_bReversedStereo(false),
       m_MIDIChannelPartMap{
           0x01,
           0x02,
@@ -73,30 +74,24 @@ bool CNukedMT32Synth::Initialize()
         return false;
     }
 
-    TMT32ROMSet InitialROMSet = CConfig::Get()->MT32EmuROMSet;
+    const TNukedMT32ROMVersion ROMVersion =
+        CConfig::Get()->NukedMT32ROMVersion;
 
-    if (InitialROMSet != TMT32ROMSet::MT32Old &&
-        InitialROMSet != TMT32ROMSet::MT32New)
-    {
-        InitialROMSet = TMT32ROMSet::Any;
-    }
-
-    if (!m_ROMManager.GetROMSet(
-            InitialROMSet,
-            m_CurrentROMSet,
+    if (!m_ROMManager.GetNukedMT32ROMSet(
+            ROMVersion,
             m_pControlROMImage,
             m_pPCMROMImage))
     {
-        LOGERR("Failed to obtain MT-32 ROM set");
+        LOGERR(
+            "Requested Nuked-MT32 Control ROM unavailable"
+        );
         return false;
     }
 
-    if (m_CurrentROMSet != TMT32ROMSet::MT32Old &&
-        m_CurrentROMSet != TMT32ROMSet::MT32New)
-    {
-        LOGERR("Nuked-MT32 currently supports MT-32 ROMs only");
-        return false;
-    }
+    m_CurrentROMSet =
+        ROMVersion <= TNukedMT32ROMVersion::V1_07
+            ? TMT32ROMSet::MT32Old
+            : TMT32ROMSet::MT32New;
 
     MT32Emu::File* const pControlFile =
         m_pControlROMImage->getFile();
@@ -555,6 +550,21 @@ size_t CNukedMT32Synth::Render(
             pOutBuffer,
             static_cast<unsigned int>(nFrames)
         );
+
+        if (m_bReversedStereo)
+        {
+            for (size_t i = 0; i < nFrames; ++i)
+            {
+                const float nLeft =
+                    pOutBuffer[i * 2];
+
+                pOutBuffer[i * 2] =
+                    pOutBuffer[i * 2 + 1];
+
+                pOutBuffer[i * 2 + 1] =
+                    nLeft;
+            }
+        }
     }
 
     m_Lock.Release();
@@ -564,8 +574,52 @@ size_t CNukedMT32Synth::Render(
 
 void CNukedMT32Synth::ReportStatus() const
 {
-    if (m_pUI)
-        m_pUI->ShowSystemMessage("Nuked-MT32 ready");
+    if (!m_pUI)
+        return;
+
+    const char* pVersion = "unknown";
+
+    if (m_pControlROMImage)
+    {
+        const MT32Emu::ROMInfo* const pROMInfo =
+            m_pControlROMImage->getROMInfo();
+
+        if (pROMInfo && pROMInfo->shortName)
+        {
+            const char* const pShortName =
+                pROMInfo->shortName;
+
+            if (strstr(pShortName, "ctrl_mt32_1_04"))
+                pVersion = "1.04";
+            else if (strstr(pShortName, "ctrl_mt32_1_05"))
+                pVersion = "1.05";
+            else if (strstr(pShortName, "ctrl_mt32_1_06"))
+                pVersion = "1.06";
+            else if (strstr(pShortName, "ctrl_mt32_1_07"))
+                pVersion = "1.07";
+            else if (strstr(pShortName, "ctrl_mt32_2_04"))
+                pVersion = "2.04";
+            else if (strstr(pShortName, "ctrl_mt32_2_06"))
+                pVersion = "2.06";
+            else if (strstr(pShortName, "ctrl_mt32_2_07"))
+                pVersion = "2.07";
+            else if (m_CurrentROMSet == TMT32ROMSet::MT32Old)
+                pVersion = "1.0x";
+            else if (m_CurrentROMSet == TMT32ROMSet::MT32New)
+                pVersion = "2.0x";
+        }
+    }
+
+    char Message[32];
+
+    snprintf(
+        Message,
+        sizeof(Message),
+        "Nuked-MT32 %s",
+        pVersion
+    );
+
+    m_pUI->ShowSystemMessage(Message);
 }
 
 void CNukedMT32Synth::UpdateLCD(

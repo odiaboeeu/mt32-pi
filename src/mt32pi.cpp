@@ -439,8 +439,12 @@ bool CMT32Pi::InitNukedMT32Synth()
 	}
 
 	m_pNukedMT32Synth->SetMIDIChannels(
-		m_pConfig->MT32EmuMIDIChannels ==
+		m_pConfig->NukedMT32MIDIChannels ==
 			CMT32Synth::TMIDIChannels::Alternate
+	);
+
+	m_pNukedMT32Synth->SetReversedStereo(
+		m_pConfig->NukedMT32ReversedStereo
 	);
 
 	m_pNukedMT32Synth->SetUserInterface(&m_UserInterface);
@@ -880,6 +884,10 @@ bool CMT32Pi::ParseCustomSysEx(const u8* pData, size_t nSize)
 		{
 			if (m_pMT32Synth)
 				m_pMT32Synth->SetReversedStereo(nParameter);
+
+			if (m_pNukedMT32Synth)
+				m_pNukedMT32Synth->SetReversedStereo(nParameter);
+
 			return true;
 		}
 

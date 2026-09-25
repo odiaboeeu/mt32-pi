@@ -58,6 +58,7 @@ template <class T, const char* pEnumStrings[], size_t N> static bool ParseEnum(c
 
 // Enum string tables
 CONFIG_ENUM_STRINGS(TSystemDefaultSynth, ENUM_SYSTEMDEFAULTSYNTH);
+CONFIG_ENUM_STRINGS(TNukedMT32ROMVersion, ENUM_NUKEDMT32ROMVERSION);
 CONFIG_ENUM_STRINGS(TSC55Model, ENUM_SC55MODEL);
 CONFIG_ENUM_STRINGS(TAudioOutputDevice, ENUM_AUDIOOUTPUTDEVICE);
 CONFIG_ENUM_STRINGS(TMT32EmuResamplerQuality, ENUM_RESAMPLERQUALITY);
@@ -205,6 +206,7 @@ bool CConfig::ParseOption(const char* pString, CIPAddress* pOut)
 
 // Define template function wrappers for parsing enums
 CONFIG_ENUM_PARSER(TSystemDefaultSynth);
+CONFIG_ENUM_PARSER(TNukedMT32ROMVersion);
 CONFIG_ENUM_PARSER(TSC55Model);
 CONFIG_ENUM_PARSER(TAudioOutputDevice);
 CONFIG_ENUM_PARSER(TMT32EmuResamplerQuality);
