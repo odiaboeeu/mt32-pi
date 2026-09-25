@@ -21,15 +21,8 @@ LOGMODULE("sc55synth");
 
 static void SC55SDLog(const char* pMessage)
 {
-        FIL File;
-        if (f_open(&File, "SD:sc55.log", FA_OPEN_APPEND | FA_WRITE) == FR_OK)
-        {
-                UINT nWritten;
-                f_write(&File, pMessage, strlen(pMessage), &nWritten);
-                f_write(&File, "\r\n", 2, &nWritten);
-                f_close(&File);
-        }
 }
+
 
 
 
